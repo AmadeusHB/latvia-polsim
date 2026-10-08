@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { RegionalAlliance, Scenario, SimulationResult } from '../types';
-import { positionScore, computeAlliances } from '../engine/simulate';
-import { valleyPositions, bankPositions, assertContiguous } from './parliament';
-import { bankPositionsCentered } from './parliament';
-import type { Slot } from './parliament';
+import { useEffect, useRef, useState } from 'react';
+import type { Scenario, SimulationResult } from '../types';
+import { computeAlliances, positionScore } from '../engine/simulate';
+import { buildValley, buildChamber, assignRuns, assertContiguity } from './chamberGeometry';
+import type { Slot } from './chamberGeometry';
 
 // ============================================================
-// Ordering
+// Display order (from the app's ideological ordering)
 // ============================================================
 
 export function arcOrder(computed: ReturnType<typeof computeAlliances>): string[] {
@@ -36,47 +35,32 @@ export function arcOrder(computed: ReturnType<typeof computeAlliances>): string[
 }
 
 // ============================================================
-// Shared presentation
+// Shared visuals (spec Part 4)
 // ============================================================
 
-interface SeatDatum { x: number; y: number; allianceId: string; label: string; }
+interface BlocInfo { colorOf: (allianceId: string) => string; nameOf: (allianceId: string) => string; }
 
-interface SeatFieldProps {
-  seats: SeatDatum[];
-  seatR: number;
-  outlineOf: (allianceId: string) => string;
-  fillOf: (allianceId: string) => string;
-  cogBadge?: boolean;
-  hovered: string | null;
-  enterProgress: number; // 0..N — seats with index < progress are visible
+function useBlocInfo(scenario: Scenario): BlocInfo {
+  const byId = new Map(scenario.alliances.map((a) => [a.id, a]));
+  const blocOf = new Map<string, string>();
+  for (const b of scenario.regionalAlliances) for (const a of b.memberAllianceIds) blocOf.set(a, b.color);
+  return {
+    colorOf: (id) => byId.get(id)?.color ?? '#bbb',
+    nameOf: (id) => byId.get(id)?.name ?? '',
+  };
+}
+const blocStroke = (scenario: Scenario) => {
+  const map = new Map<string, string>();
+  for (const b of scenario.regionalAlliances) for (const a of b.memberAllianceIds) map.set(a, b.color);
+  return (id: string) => map.get(id) ?? '#999';
+};
+
+function useHover() {
+  const [hovered, setHovered] = useState<string | null>(null);
+  return { hovered, setHovered };
 }
 
-function SeatField({ seats, seatR, outlineOf, fillOf, cogBadge, hovered, enterProgress }: SeatFieldProps) {
-  const dim = hovered != null;
-  return (
-    <g>
-      {seats.map((s, i) => {
-        const visible = i < enterProgress;
-        const isDim = dim && s.allianceId !== hovered;
-        return (
-          <circle key={i} cx={s.x} cy={s.y} r={seatR}
-            fill={fillOf(s.allianceId)} stroke={outlineOf(s.allianceId)} strokeWidth={2}
-            opacity={visible ? (isDim ? 0.22 : 1) : 0}
-            style={{ transition: 'opacity 90ms linear' }}>
-            <title>{s.label}</title>
-          </circle>
-        );
-      })}
-      {cogBadge && seats.map((s, i) => (
-        <text key={'b' + i} x={s.x} y={s.y + 4.5} textAnchor="middle" fontSize={seatR * 0.62} fill="#fff"
-          fontWeight={800} opacity={i < enterProgress && !(dim && s.allianceId !== hovered) ? 1 : 0}
-          style={{ transition: 'opacity 90ms linear', pointerEvents: 'none' }}>2×</text>
-      ))}
-    </g>
-  );
-}
-
-// Entrance animation: reveal seats in display order over ~600ms (respects reduced motion).
+// Entrance animation (600ms, display order; disabled under reduced motion).
 function useEnterProgress(count: number): number {
   const [progress, setProgress] = useState(count);
   const raf = useRef<number | null>(null);
@@ -88,7 +72,6 @@ function useEnterProgress(count: number): number {
     setProgress(0);
     const tick = (now: number) => {
       const p = Math.min(1, (now - t0) / D);
-      // ease-out
       setProgress(Math.round(count * (1 - Math.pow(1 - p, 2))));
       if (p < 1) raf.current = requestAnimationFrame(tick);
     };
@@ -98,36 +81,58 @@ function useEnterProgress(count: number): number {
   return progress;
 }
 
-function useHover() {
-  const [hovered, setHovered] = useState<string | null>(null);
-  return { hovered, setHovered };
+function Seats({
+  seats, seatR, strokeOf, fillOf, cogBadge, hovered, progress,
+}: {
+  seats: { x: number; y: number; allianceId: string; label: string }[];
+  seatR: number; strokeOf: (id: string) => string; fillOf: (id: string) => string;
+  cogBadge?: boolean; hovered: string | null; progress: number;
+}) {
+  const dim = hovered != null;
+  return (
+    <g>
+      {seats.map((s, i) => {
+        const visible = i < progress;
+        const isDim = dim && s.allianceId !== hovered;
+        return (
+          <circle key={i} cx={s.x} cy={s.y} r={seatR}
+            fill={fillOf(s.allianceId)} stroke={strokeOf(s.allianceId)} strokeWidth={2}
+            opacity={visible ? (isDim ? 0.25 : 1) : 0}
+            style={{ transition: 'opacity 90ms linear' }}>
+            <title>{s.label}</title>
+          </circle>
+        );
+      })}
+      {cogBadge && seats.map((s, i) => (
+        <text key={'b' + i} x={s.x} y={s.y + 4} textAnchor="middle" fontSize={seatR * 0.6} fill="#fff"
+          fontWeight={800} pointerEvents="none"
+          opacity={i < progress && !(dim && s.allianceId !== hovered) ? 1 : 0}
+          style={{ transition: 'opacity 90ms linear' }}>2×</text>
+      ))}
+    </g>
+  );
 }
 
-function LegendList({
-  scenario, entries, total, hovered, setHovered,
-}: {
+function Legend({ scenario, entries, hovered, setHovered, sort = true }: {
   scenario: Scenario;
   entries: { id: string; seats: number }[];
-  total: number;
   hovered: string | null;
   setHovered: (id: string | null) => void;
+  sort?: boolean;
 }) {
   const byId = new Map(scenario.alliances.map((a) => [a.id, a]));
-  const blocOf = new Map<string, RegionalAlliance>();
-  for (const b of scenario.regionalAlliances) for (const a of b.memberAllianceIds) blocOf.set(a, b);
-  const sorted = [...entries].sort((a, b) => b.seats - a.seats);
+  const stroke = blocStroke(scenario);
+  const list = sort ? [...entries].sort((a, b) => b.seats - a.seats) : entries;
   return (
     <div className="parliament-legend">
-      {sorted.map(({ id, seats }) => {
+      {list.map(({ id, seats }) => {
         const a = byId.get(id);
         if (!a || seats <= 0) return null;
-        const bloc = blocOf.get(id);
         return (
           <span key={id} className="legend-item" style={{ opacity: hovered && hovered !== id ? 0.35 : 1 }}
             onMouseEnter={() => setHovered(id)} onMouseLeave={() => setHovered(null)}>
-            <span className="legend-dot" style={{ background: a.color, borderColor: bloc ? bloc.color : '#aab1bf', borderWidth: 2 }} />
+            <span className="legend-dot" style={{ background: a.color, borderColor: stroke(id), borderWidth: 2, borderRadius: '50%' }} />
             {a.name} <strong>{seats}</strong>
-            <span className="subtle" style={{ margin: 0 }}>({(100 * seats / (total || 1)).toFixed(1)}%)</span>
           </span>
         );
       })}
@@ -135,9 +140,9 @@ function LegendList({
   );
 }
 
-function ChamberCard({
-  title, subtitle, right, swatch, children,
-}: { title: string; subtitle: string; right?: string; swatch: string; children: React.ReactNode }) {
+function ChamberCard({ title, subtitle, right, swatch, children, warning }: {
+  title: string; subtitle: string; right?: string; swatch: string; children: React.ReactNode; warning?: string | null;
+}) {
   return (
     <div className="diagram-card">
       <div className="diagram-head">
@@ -150,43 +155,29 @@ function ChamberCard({
         </div>
         {right && <div className="diagram-total">{right}</div>}
       </div>
+      {warning && <div className="issue warn" style={{ marginTop: 8 }}>{warning}</div>}
       <div className="diagram-body">{children}</div>
     </div>
   );
 }
 
 // ============================================================
-// Saeima — valley U, ideological order left → right
+// TYPE A — Saeima ideological arc valley
 // ============================================================
 
 export function SaeimaArc({ scenario }: { scenario: Scenario }) {
   const { hovered, setHovered } = useHover();
+  const info = useBlocInfo(scenario);
+  const stroke = blocStroke(scenario);
   const computed = computeAlliances(scenario);
   const order = arcOrder(computed);
-  const seatsOf = (aid: string) => scenario.parties.filter((p) => p.allianceId === aid).reduce((sum, p) => sum + p.saeimaSeats, 0);
-  const seatAssign: string[] = [];
-  for (const aid of order) for (let k = 0; k < seatsOf(aid); k++) seatAssign.push(aid);
-  const total = seatAssign.length;
-  const entries = order.map((aid) => ({ id: aid, seats: seatsOf(aid) })).filter((e) => e.seats > 0);
-
-  const seatR = 7.5;
-  const geo = useMemo(() => valleyPositions(Math.max(total, 1), seatR, 9), [total]);
-  const progress = useEnterProgress(total);
-  const byId = new Map(scenario.alliances.map((a) => [a.id, a]));
-
-  const r_o = geo.r_o;
-  const padX = 100;
-  const W = Math.round(2 * r_o + 2 * padX);
-  const cx = W / 2;
-  const cy0 = 108;                 // circle center — valley opens UP from here
-  const H = Math.round(cy0 + r_o + 56);
-  const majority = Math.floor(301 / 2) + 1;
-
-  const seats: SeatDatum[] = geo.slots.map((s, i) => ({
-    x: cx + s.x, y: cy0 + s.y,
-    allianceId: seatAssign[i] ?? '',
-    label: `${byId.get(seatAssign[i] ?? '')?.name ?? ''} — ${seatsOf(seatAssign[i] ?? '')} seats`,
-  }));
+  const seatsOf = (aid: string) => scenario.parties.filter((p) => p.allianceId === aid).reduce((s, p) => s + p.saeimaSeats, 0);
+  const seatAssign: { id: string; seats: number }[] = order
+    .map((aid) => ({ id: aid, seats: seatsOf(aid) }))
+    .filter((p) => p.seats > 0);
+  const total = seatAssign.reduce((s, p) => s + p.seats, 0);
+  const enteredTotal = scenario.parties.reduce((s, p) => s + p.saeimaSeats, 0);
+  const warning = enteredTotal !== 301 ? `Entered seats: ${enteredTotal}/301 — Saeima must total 301` : null;
 
   if (total === 0) return (
     <ChamberCard title="Saeima — Republic of Latvia" subtitle="no seats entered"
@@ -195,64 +186,77 @@ export function SaeimaArc({ scenario }: { scenario: Scenario }) {
     </ChamberCard>
   );
 
-  // Self-check: contiguity per alliance (Fix 3 Step 4)
-  assertContiguous('Saeima', seats, seatAssign, seatR);
+  const layout = buildValley(total);
+  const runs = assignRuns(layout.slots, seatAssign);
+  const headroom = 96;
+  const offsetX = layout.W / 2 + layout.cx * -1; // center horizontally
+  const seats: { x: number; y: number; allianceId: string; label: string }[] = [];
+  const flat: { x: number; y: number; partyId: string }[] = [];
+  let seq = 0;
+  for (const p of seatAssign) {
+    for (const slot of runs.get(p.id) ?? []) {
+      seats.push({
+        x: offsetX + slot.x, y: headroom + slot.y, allianceId: p.id,
+        label: `${info.nameOf(p.id)} — ${p.seats} seats`,
+      });
+      flat.push({ x: offsetX + slot.x, y: headroom + slot.y, partyId: p.id });
+      seq++;
+    }
+  }
+  void seq;
+  const progress = useEnterProgress(seats.length);
+  assertContiguity('Saeima', flat, layout.seatR * 2);
+  const majority = Math.floor(301 / 2) + 1;
+  const entries = seatAssign.map((p) => ({ id: p.id, seats: p.seats }));
 
   return (
     <ChamberCard
       title="Saeima — Republic of Latvia"
-      subtitle={`${entries.length} alliances · majority at ${majority}`}
+      subtitle={`${seatAssign.length} alliances · majority at ${majority}`}
       right={`${total} / 301 seats`}
       swatch="linear-gradient(180deg,#3457d5,#7b96ec)"
+      warning={warning}
     >
-      <svg viewBox={`0 0 ${W} ${H}`} className="diagram" role="img" aria-label="Saeima seat diagram">
-        {SeatField({
-          seats, seatR,
-          fillOf: (id) => byId.get(id)?.color ?? '#999',
-          outlineOf: () => '#ffffff',
-          hovered, enterProgress: progress,
-        })}
+      <svg viewBox={`0 0 ${layout.W} ${layout.H}`} className="diagram" role="img" aria-label="Saeima seat diagram">
+        <Seats seats={seats} seatR={layout.seatR} strokeOf={stroke} fillOf={info.colorOf} hovered={hovered} progress={progress} />
         {/* majority tick at the bottom-center of the band */}
-        <line x1={cx - 7} y1={cy0 + r_o + 7} x2={cx + 7} y2={cy0 + r_o + 7} stroke="#c3c9d8" strokeWidth={2} />
-        <text x={cx} y={cy0 + r_o + 23} textAnchor="middle" className="svg-sub">majority {majority}</text>
-        {/* light center label inside the valley mouth */}
-        <text x={cx} y={cy0 - 26} textAnchor="middle" className="svg-sub" fontSize={12}>Saeima · Republic of Latvia</text>
-        <text x={cx} y={cy0 - 8} textAnchor="middle" fontSize={17} fontWeight={800} fill="#98a0b3">
+        <line x1={offsetX - 7} y1={headroom + layout.radii[layout.radii.length - 1] + layout.seatR + 5}
+          x2={offsetX + 7} y2={headroom + layout.radii[layout.radii.length - 1] + layout.seatR + 5}
+          stroke="#c3c9d8" strokeWidth={2} />
+        <text x={offsetX} y={headroom + layout.radii[layout.radii.length - 1] + layout.seatR + 20}
+          textAnchor="middle" className="svg-sub">majority {majority}</text>
+        {/* center label in the valley mouth (above the band) */}
+        <text x={offsetX} y={headroom - 44} textAnchor="middle" className="svg-sub" fontSize={12}>Saeima · Republic of Latvia</text>
+        <text x={offsetX} y={headroom - 22} textAnchor="middle" fontSize={17} fontWeight={800} fill="#98a0b3">
           {total}<tspan fontSize={11} fill="#b6bcc9"> / 301</tspan>
         </text>
-        {/* ideological axis */}
-        <text x={cx - r_o - 50} y={cy0 - 4} textAnchor="middle" className="axis-label">← Far Left</text>
-        <text x={cx + r_o + 50} y={cy0 - 4} textAnchor="middle" className="axis-label">Far Right →</text>
+        {/* ideological axis at the arm ends */}
+        <text x={offsetX - layout.radii[layout.radii.length - 1] - 40} y={headroom - 6} textAnchor="middle" className="axis-label">← Far Left</text>
+        <text x={offsetX + layout.radii[layout.radii.length - 1] + 40} y={headroom - 6} textAnchor="middle" className="axis-label">Far Right →</text>
       </svg>
-      <LegendList scenario={scenario} entries={entries} total={total} hovered={hovered} setHovered={setHovered} />
+      <Legend scenario={scenario} entries={entries} hovered={hovered} setHovered={setHovered} />
     </ChamberCard>
   );
 }
 
 // ============================================================
-// Westminster chamber (CoR / CoG): facing banks + floor + cross-bench
+// TYPE B — Westminster rectangular chamber (CoR / CoG)
 // ============================================================
 
 type Sec = 'gov' | 'supply' | 'cross' | 'opp';
-
-const SEC_STYLE: Record<Sec, { label: string; color: string }> = {
+const SEC_LABEL: Record<Sec, { label: string; color: string }> = {
   gov: { label: 'GOVERNMENT', color: '#1d4ed8' },
   supply: { label: 'SUPPLY & CONFIDENCE', color: '#0e7490' },
   cross: { label: 'CROSS-BENCH', color: '#64748b' },
   opp: { label: 'OPPOSITION', color: '#b91c1c' },
 };
 
-export function WestminsterDiagram({
-  scenario, results, mode,
-}: {
-  scenario: Scenario;
-  results: SimulationResult;
-  mode: 'cor' | 'cog';
+export function WestminsterDiagram({ scenario, results, mode }: {
+  scenario: Scenario; results: SimulationResult; mode: 'cor' | 'cog';
 }) {
   const { hovered, setHovered } = useHover();
-  const blocOf = new Map<string, RegionalAlliance>();
-  for (const b of scenario.regionalAlliances) for (const a of b.memberAllianceIds) blocOf.set(a, b);
-  const allianceById = new Map(scenario.alliances.map((a) => [a.id, a]));
+  const info = useBlocInfo(scenario);
+  const stroke = blocStroke(scenario);
   const computed = computeAlliances(scenario);
   const order = arcOrder(computed);
 
@@ -267,10 +271,11 @@ export function WestminsterDiagram({
     }
   }
   const N = seatList.length;
+  const isCog = mode === 'cog';
   if (N === 0) return (
-    <ChamberCard title={mode === 'cor' ? 'Council of Regions' : 'Council of Governors'}
-      subtitle={mode === 'cor' ? '150 seats' : '18 governors · 2 votes each in joint session'}
-      swatch={mode === 'cor' ? 'linear-gradient(180deg,#1a7f4e,#57c08a)' : 'linear-gradient(180deg,#9e2b3c,#d4704f)'}>
+    <ChamberCard title={isCog ? 'Council of Governors' : 'Council of Regions'}
+      subtitle={isCog ? '18 governors · 2 votes each' : '150 seats'}
+      swatch={isCog ? 'linear-gradient(180deg,#9e2b3c,#d4704f)' : 'linear-gradient(180deg,#1a7f4e,#57c08a)'}>
       <div className="empty-note">Run a simulation first.</div>
     </ChamberCard>
   );
@@ -287,188 +292,90 @@ export function WestminsterDiagram({
     groups[sec] = seatList.filter((s) => secOf.get(s.allianceId) === sec)
       .sort((a, b) => (blocOrder.get(a.allianceId) ?? 99) - (blocOrder.get(b.allianceId) ?? 99));
   }
+  // Display order inside a zone: by regional bloc, then seats (largest first).
+  const zoneOrder = (list: { allianceId: string }[]) => {
+    const ids = [...new Set(list.map((s) => s.allianceId))];
+    return ids.sort((a, b) => {
+      const ba = scenario.alliances.find((x) => x.id === a)?.regionalAllianceId ?? '';
+      const bb = scenario.alliances.find((x) => x.id === b)?.regionalAllianceId ?? '';
+      if (ba !== bb) return ba.localeCompare(bb);
+      const na = list.filter((s) => s.allianceId === a).length;
+      const nb = list.filter((s) => s.allianceId === b).length;
+      return nb - na;
+    }).map((id) => ({ id, seats: list.filter((s) => s.allianceId === id).length }));
+  };
 
-  const seatR = mode === 'cor' ? 9 : 19;
+  const oppN = groups.opp.length, govN = groups.gov.length, supN = groups.supply.length, crossN = groups.cross.length;
+  const layout = buildChamber(oppN, govN, supN, crossN, isCog);
   const progress = useEnterProgress(N);
 
-  // ---- Bank geometry ----
-  // Government: left bank, arc opening toward the floor (right-down).
-  // Supply: attached at the government bank's floor end (bottom of its arc).
-  // Opposition: right bank, mirrored. Cross-bench: small bank above the floor.
-  // Each bank gets its own slot list; sections map onto slots contiguously.
-  const govN = groups.gov.length, supN = groups.supply.length, oppN = groups.opp.length, crossN = groups.cross.length;
-  const sweep = (100 * Math.PI) / 180;
-  const govRows = mode === 'cor' ? 4 : 2;
-  const floorW = mode === 'cor' ? 210 : 250;   // clear floor gap between banks
-  const govGeo = bankPositionsCentered(Math.max(govN + supN, 1), seatR, govRows, sweep, 1);
-  const oppGeo = oppN > 0
-    ? bankPositionsCentered(oppN, seatR, mode === 'cor' ? 4 : 2, sweep, -1)
-    : { slots: [] as Slot[], r_i: 0, r_o: 0, rows: 0 };
-  // Cross-bench bank: fit inside the floor gap. Adding rows makes the bank
-  // deeper and narrower (same seat count over more, shorter rows), so increase
-  // rows until its width fits, capped so it stays a small detached bank.
-  const crossMaxW = floorW - 2 * seatR - 24;
-  const crossWidth = (g: typeof crossGeo0) => {
-    if (!g.slots.length) return 0;
-    let x0 = Infinity, x1 = -Infinity;
-    for (const p of g.slots) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); }
-    return x1 - x0 + 2 * seatR;
-  };
-  const crossGeo0 = crossN > 0
-    ? bankPositions(crossN, seatR, mode === 'cor' ? 3 : 2, (90 * Math.PI) / 180, 1, true)
-    : { slots: [] as Slot[], r_i: 0, r_o: 0, rows: 0 };
-  let crossGeo = crossGeo0;
-  if (crossN > 0) {
-    let rows = mode === 'cor' ? 3 : 2;
-    while (crossWidth(crossGeo) > crossMaxW && rows < 12) {
-      rows++;
-      crossGeo = bankPositions(crossN, seatR, rows, (90 * Math.PI) / 180, 1, true);
+  const seats: { x: number; y: number; allianceId: string; label: string }[] = [];
+  const flat: { x: number; y: number; partyId: string }[] = [];
+  const place = (zoneSlots: Slot[], zoneList: { allianceId: string }[], zone: Sec) => {
+    if (zoneList.length === 0) return;
+    const ordered = zoneOrder(zoneList);
+    const runs = assignRuns(zoneSlots, ordered);
+    let i = 0;
+    for (const p of ordered) {
+      for (const slot of runs.get(p.id) ?? []) {
+        seats.push({
+          x: slot.x, y: slot.y, allianceId: p.id,
+          label: `${info.nameOf(p.id)}${zone === 'supply' ? ' (S&C)' : ''}${isCog ? ' · 2 votes' : ''}`,
+        });
+        flat.push({ x: slot.x, y: slot.y, partyId: p.id });
+        i++;
+      }
     }
-  }
-
-  // Chamber layout: banks face each other across a floor gap at bottom-center.
-  // Left bank: opening (its valley mouth) faces RIGHT. Our valley opens up;
-  // rotate the left bank -90°-ish so its arc faces the floor... simpler:
-  // rotate banks by 90°: left bank = valley rotated so band runs vertically
-  // on the left, arcing toward center-bottom.
-  const rot = (slots: Slot[], deg: number): Slot[] => {
-    const a = (deg * Math.PI) / 180;
-    const c = Math.cos(a), s = Math.sin(a);
-    return slots.map((p) => ({ ...p, x: p.x * c - p.y * s, y: p.x * s + p.y * c }));
+    void i;
   };
+  place(layout.opposition.slots, groups.opp, 'opp');
+  place(layout.government.slots, groups.gov, 'gov');
+  place(layout.supply.slots, groups.supply, 'supply');
+  place(layout.cross.slots, groups.cross, 'cross');
+  assertContiguity(isCog ? 'CoG' : 'CoR', flat, layout.seatD);
 
-  // Government bank: valley rotated +90° → band arcs on the LEFT, opening faces RIGHT (toward floor).
-  const govSlots = rot(govGeo.slots, 90);
-  // Opposition bank: valley rotated -90° → band on the RIGHT, opening faces LEFT.
-  const oppSlots = rot(oppGeo.slots, -90);
-  // Cross-bench: unrotated valley above the floor, opening faces DOWN.
-  const crossSlots = crossGeo.slots;
-
-  const extOf = (slots: Slot[]) => {
-    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-    for (const s of slots) { x0 = Math.min(x0, s.x); x1 = Math.max(x1, s.x); y0 = Math.min(y0, s.y); y1 = Math.max(y1, s.y); }
-    if (slots.length === 0) return { x0: 0, x1: 0, y0: 0, y1: 0 };
-    return { x0, x1, y0, y1 };
-  };
-  const gExt = extOf(govSlots);
-  const oExt = extOf(oppSlots);
-  const cExt = extOf(crossSlots);
-
-  const pad = 66;
-  const leftW = govN + supN > 0 ? gExt.x1 - gExt.x0 + 2 * seatR : 0;
-  const rightW = oppN > 0 ? oExt.x1 - oExt.x0 + 2 * seatR : 0;
-  const W = Math.round(pad + Math.max(leftW, 60) + floorW + Math.max(rightW, 0) + pad);
-  const crossZoneH = crossN > 0 ? cExt.y1 - cExt.y0 + 2 * seatR + 26 : 0;
-  const H = Math.round(crossZoneH + Math.max(gExt.y1 - gExt.y0, oExt.y1 - oExt.y0) + 2 * seatR + pad + 54);
-
-  // Offsets: government bank sits left of the floor; its seats ordered so the
-  // first slot (t=0 end) is nearest the floor? For the rotated valley (rot +90°),
-  // t=0 end lands at the BOTTOM. We want Government to own the upper part and
-  // Supply the seats nearest the floor: government run starts at t=0 (bottom)
-  // — no: supply must be nearest the floor. So give Supply the FIRST run
-  // (bottom end of the bank) and Government the rest? The instruction says
-  // Supply is "at the bank's end nearest the floor" — as long as it's attached
-  // there, either internal order works; Gov first from the top reads better.
-  // t=0 after +90° rotation maps to the bottom; so assign Government from the
-  // END of the slot list backwards? Simplest: reverse the govSlots so t runs
-  // bottom→top... instead: assign supply LAST run nearest floor = give supply
-  // the slots at the bottom = the first slots after rotation.
-  const govOffsetX = pad + seatR - gExt.x0;
-  const bankBottom = H - pad - 30;
-  const govOffsetY = bankBottom - gExt.y1;
-  const oppOffsetX = W - pad - seatR - oExt.x1;
-  const oppOffsetY = bankBottom - oExt.y1;
-  const crossOffsetX = W / 2 - (cExt.x0 + cExt.x1) / 2;
-  const crossOffsetY = pad - cExt.y0;
-
-  // Build ordered seat arrays per bank. Government+Supply share the left bank:
-  // Government takes the run of slots AWAY from the floor, Supply the run at
-  // the floor end (bottom of the rotated arc), so the two stay attached.
-  const govRun = govSlots.slice(0, govN);
-  const supRun = govSlots.slice(govN, govN + supN);
-  // After +90° rotation, slot index 0 (t=0) is at the BOTTOM (floor end).
-  // We want Supply nearest the floor → Supply gets slots [0..supN).
-  const leftBankRun = [...supRun, ...govRun];
-  const leftOrdered: { allianceId: string }[] = [...groups.supply.map((s) => ({ allianceId: s.allianceId })), ...groups.gov.map((s) => ({ allianceId: s.allianceId }))];
-
-  const seats: SeatDatum[] = [];
-  const owners: string[] = [];
-  const pushBank = (slots: Slot[], orderedOwner: { allianceId: string }[], ox: number, oy: number) => {
-    if (orderedOwner.length === 0) return;
-    slots.slice(0, orderedOwner.length).forEach((s, i) => {
-      const owner = orderedOwner[i].allianceId;
-      const al = allianceById.get(owner);
-      const bloc = blocOf.get(owner);
-      seats.push({
-        x: ox + s.x, y: oy + s.y, allianceId: owner,
-        label: `${al?.name ?? ''}${bloc ? ` (${bloc.name})` : ''}${mode === 'cog' ? ' · 2 votes' : ''}`,
-      });
-      owners.push(owner);
-    });
-  };
-  pushBank(leftBankRun, leftOrdered, govOffsetX, govOffsetY);
-  pushBank(oppSlots, groups.opp, oppOffsetX, oppOffsetY);
-  if (crossN > 0) pushBank(crossSlots, groups.cross, crossOffsetX, crossOffsetY);
-
-  // Self-check per section (Fix 3 Step 4) — zones are separate banks by
-  // construction, so verify per alliance within the whole set.
-  assertContiguous(mode === 'cor' ? 'CoR' : 'CoG', seats, owners, seatR);
-
-  const totalWeight = mode === 'cog' ? seatList.reduce((s, x) => s + x.weight, 0) : seatList.length;
+  const totalWeight = isCog ? seatList.reduce((s, x) => s + x.weight, 0) : seatList.length;
   const secEntries = (sec: Sec) => {
     const ids = [...new Set(groups[sec].map((s) => s.allianceId))];
     return ids.map((id) => ({ id, seats: groups[sec].filter((s) => s.allianceId === id).length }));
   };
-
-  const title = mode === 'cor' ? 'Council of Regions' : 'Council of Governors';
-  const fillOf = (id: string) => allianceById.get(id)?.color ?? '#bbb';
-  const outlineOf = (id: string) => blocOf.get(id)?.color ?? '#aab1bf';
-
-  // Label anchors
-  const govLabel = { x: govOffsetX + gExt.x0 + (gExt.x1 - gExt.x0) / 2, y: govOffsetY + gExt.y0 - 14 };
-  const oppLabel = { x: oppOffsetX + oExt.x0 + (oExt.x1 - oExt.x0) / 2, y: oppOffsetY + oExt.y0 - 14 };
-  const crossLabel = { x: W / 2, y: crossN > 0 ? crossOffsetY + cExt.y1 + 18 : 0 };
+  const d = layout.seatD;
+  const labelAbove = (x: number, y: number, sec: Sec) => (
+    <text x={x} y={y} textAnchor="middle" className="divider-label" fill={SEC_LABEL[sec].color}>
+      {`${SEC_LABEL[sec].label} · ${groups[sec].length}`}
+    </text>
+  );
 
   return (
     <ChamberCard
-      title={title}
-      subtitle={mode === 'cor'
-        ? `${N} of 150 seats · ${groups.gov.length} government · ${groups.opp.length} opposition`
-        : `${N} governors · each carries 2 votes in the joint session`}
-      right={mode === 'cor' ? `${N} / 150 seats` : `${totalWeight} joint votes`}
-      swatch={mode === 'cor' ? 'linear-gradient(180deg,#1a7f4e,#57c08a)' : 'linear-gradient(180deg,#9e2b3c,#d4704f)'}
+      title={isCog ? 'Council of Governors' : 'Council of Regions'}
+      subtitle={isCog ? `${N} governors · each carries 2 votes in the joint session` : `${N} of 150 seats`}
+      right={isCog ? `${totalWeight} joint votes` : `${N} / 150 seats`}
+      swatch={isCog ? 'linear-gradient(180deg,#9e2b3c,#d4704f)' : 'linear-gradient(180deg,#1a7f4e,#57c08a)'}
     >
-      <svg viewBox={`0 0 ${W} ${H}`} className="diagram" role="img" aria-label={`${title} seat diagram`}>
-        {SeatField({ seats, seatR, fillOf, outlineOf, cogBadge: mode === 'cog', hovered, enterProgress: progress })}
-        {/* section labels */}
-        {groups.gov.length > 0 && (
-          <text x={govLabel.x} y={govLabel.y} textAnchor="middle" className="divider-label" fill={SEC_STYLE.gov.color}>
-            {SEC_STYLE.gov.label} · {groups.gov.length}
+      <svg viewBox={`0 0 ${layout.W} ${layout.H}`} className="diagram" role="img" aria-label={`${isCog ? 'Council of Governors' : 'Council of Regions'} seat diagram`}>
+        <Seats seats={seats} seatR={d / 2 - 1} strokeOf={stroke} fillOf={info.colorOf} cogBadge={isCog} hovered={hovered} progress={progress} />
+        {/* zone labels */}
+        {oppN > 0 && labelAbove(layout.bankX + layout.bankW / 2, layout.oppY - 6, 'opp')}
+        {govN > 0 && labelAbove(layout.bankX + layout.bankW / 2, layout.govY - 6, 'gov')}
+        {supN > 0 && (
+          <text x={layout.supplyX + 40} y={layout.govY - 6} textAnchor="middle" className="divider-label" fill={SEC_LABEL.supply.color}>
+            {`SUPPLY & CONFIDENCE · ${supN}`}
           </text>
         )}
-        {groups.supply.length > 0 && (
-          <text x={govOffsetX + gExt.x0 + (gExt.x1 - gExt.x0) / 2} y={govOffsetY + gExt.y1 + 20}
-            textAnchor="middle" className="divider-label" fill={SEC_STYLE.supply.color}>
-            {SEC_STYLE.supply.label} · {groups.supply.length}
+        {crossN > 0 && (
+          <text x={layout.crossX + (layout.cross.cols * d) / 2} y={layout.crossY - 6} textAnchor="middle" className="divider-label" fill={SEC_LABEL.cross.color}>
+            {`CROSS-BENCH · ${crossN}`}
           </text>
         )}
-        {groups.cross.length > 0 && (
-          <text x={crossLabel.x} y={crossLabel.y} textAnchor="middle" className="divider-label" fill={SEC_STYLE.cross.color}>
-            {SEC_STYLE.cross.label} · {groups.cross.length}
-          </text>
-        )}
-        {groups.opp.length > 0 && (
-          <text x={oppLabel.x} y={oppLabel.y} textAnchor="middle" className="divider-label" fill={SEC_STYLE.opp.color}>
-            {SEC_STYLE.opp.label} · {groups.opp.length}
-          </text>
-        )}
-        {/* center floor label */}
-        <text x={W / 2} y={bankBottom - 26} textAnchor="middle" className="svg-sub" fontSize={12}>
-          {mode === 'cor' ? 'Council of Regions' : 'Council of Governors'}
+        {/* floor center label */}
+        <text x={layout.bankX + layout.bankW / 2} y={layout.floorY + (layout.govY - layout.floorY) / 2 - 2}
+          textAnchor="middle" fontSize={12} className="svg-sub">
+          {isCog ? 'Council of Governors' : 'Council of Regions'}
         </text>
-        <text x={W / 2} y={bankBottom - 8} textAnchor="middle" fontSize={17} fontWeight={800} fill="#98a0b3">
-          {mode === 'cor' ? N : totalWeight}
-          <tspan fontSize={11} fill="#b6bcc9">{mode === 'cor' ? ' / 150' : ' joint votes'}</tspan>
+        <text x={layout.bankX + layout.bankW / 2} y={layout.floorY + (layout.govY - layout.floorY) / 2 + 16}
+          textAnchor="middle" fontSize={15} fontWeight={800} fill="#98a0b3">
+          {isCog ? `${totalWeight} joint votes` : `${N} / 150`}
         </text>
       </svg>
       <div className="legend-cols">
@@ -476,10 +383,10 @@ export function WestminsterDiagram({
           groups[sec].length > 0 && (
             <div key={sec} className="legend-col">
               <div className="legend-title">
-                <span className="sec-dot" style={{ background: SEC_STYLE[sec].color }} />
-                {SEC_STYLE[sec].label} — {groups[sec].length}
+                <span className="sec-dot" style={{ background: SEC_LABEL[sec].color }} />
+                {SEC_LABEL[sec].label} — {groups[sec].length}
               </div>
-              <LegendList scenario={scenario} entries={secEntries(sec)} total={N} hovered={hovered} setHovered={setHovered} />
+              <Legend scenario={scenario} entries={secEntries(sec)} hovered={hovered} setHovered={setHovered} />
             </div>
           )
         ))}

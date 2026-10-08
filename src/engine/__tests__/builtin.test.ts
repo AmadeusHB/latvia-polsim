@@ -10,9 +10,9 @@ it('built-in template: 25th Saeima loads and simulates correctly', () => {
   // Structure: 18 alliances, 4 blocs, 301 Saeima seats total
   expect(sc.alliances.length).toBe(17);
   expect(sc.regionalAlliances.length).toBe(4);
-  // The 25th Saeima lore tables sum to 300 seats (one seat unlisted).
+  // The 25th Saeima totals exactly 301 seats (Humane Riga +1 applied).
   const seats = sc.parties.reduce((s, p) => s + p.saeimaSeats, 0);
-  expect(seats).toBe(300);
+  expect(seats).toBe(301);
   // Validation: no errors
   const issues = validateScenario(sc, defaultDistricts());
   expect(issues.filter((i) => i.level === 'error')).toEqual([]);

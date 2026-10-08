@@ -22,7 +22,7 @@ const LEFT_25TH: { alliances: AllianceT[]; blocs: BlocT[]; seed: number } = {
   alliances: [
     { key: 'repc', name: 'Republican Coalition', color: '#0e8845', status: 'Government', parties: [
       { name: 'Progress', seats: 41, positions: ['Left Wing', 'Center Left'], dominant: 'Left Wing', eu: 'Pro-EU', ideology: 'Progressivism', secondary: ['Green Politics'], home: ['Riga', 'Jelgava', 'Ventspils', 'Jūrmala'] },
-      { name: 'Humane Riga', seats: 15, positions: ['Center Left'], dominant: 'Center Left', eu: 'Pro-EU', ideology: 'Urbanism/YIMBYism', secondary: ['Economic Progressivism'], home: ['Riga'] },
+      { name: 'Humane Riga', seats: 16, positions: ['Center Left'], dominant: 'Center Left', eu: 'Pro-EU', ideology: 'Urbanism/YIMBYism', secondary: ['Economic Progressivism'], home: ['Riga'] },
       { name: 'Civic Alliance', seats: 7, positions: ['Center Left'], dominant: 'Center Left', eu: 'Pro-EU', ideology: 'Social Liberalism', secondary: [], home: ['Pierīga'] },
     ] },
     { key: 'socdem', name: 'The Social Democrats', color: '#fe0000', status: 'Government', parties: [
