@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RegionalAlliance, Scenario, SimulationResult } from '../types';
 import { positionScore, computeAlliances } from '../engine/simulate';
 import { valleyPositions, bankPositions, assertContiguous } from './parliament';
+import { bankPositionsCentered } from './parliament';
 import type { Slot } from './parliament';
 
 // ============================================================
@@ -298,9 +299,32 @@ export function WestminsterDiagram({
   const govN = groups.gov.length, supN = groups.supply.length, oppN = groups.opp.length, crossN = groups.cross.length;
   const sweep = (100 * Math.PI) / 180;
   const govRows = mode === 'cor' ? 4 : 2;
-  const govGeo = bankPositions(Math.max(govN + supN, 1), seatR, govRows, sweep, 1);
-  const oppGeo = bankPositions(Math.max(oppN, 1), seatR, mode === 'cor' ? 4 : 2, sweep, -1);
-  const crossGeo = bankPositions(Math.max(crossN, 1), seatR, mode === 'cor' ? 2 : 1, (70 * Math.PI) / 180, 1);
+  const floorW = mode === 'cor' ? 210 : 250;   // clear floor gap between banks
+  const govGeo = bankPositionsCentered(Math.max(govN + supN, 1), seatR, govRows, sweep, 1);
+  const oppGeo = oppN > 0
+    ? bankPositionsCentered(oppN, seatR, mode === 'cor' ? 4 : 2, sweep, -1)
+    : { slots: [] as Slot[], r_i: 0, r_o: 0, rows: 0 };
+  // Cross-bench bank: fit inside the floor gap. Adding rows makes the bank
+  // deeper and narrower (same seat count over more, shorter rows), so increase
+  // rows until its width fits, capped so it stays a small detached bank.
+  const crossMaxW = floorW - 2 * seatR - 24;
+  const crossWidth = (g: typeof crossGeo0) => {
+    if (!g.slots.length) return 0;
+    let x0 = Infinity, x1 = -Infinity;
+    for (const p of g.slots) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); }
+    return x1 - x0 + 2 * seatR;
+  };
+  const crossGeo0 = crossN > 0
+    ? bankPositions(crossN, seatR, mode === 'cor' ? 3 : 2, (90 * Math.PI) / 180, 1, true)
+    : { slots: [] as Slot[], r_i: 0, r_o: 0, rows: 0 };
+  let crossGeo = crossGeo0;
+  if (crossN > 0) {
+    let rows = mode === 'cor' ? 3 : 2;
+    while (crossWidth(crossGeo) > crossMaxW && rows < 12) {
+      rows++;
+      crossGeo = bankPositions(crossN, seatR, rows, (90 * Math.PI) / 180, 1, true);
+    }
+  }
 
   // Chamber layout: banks face each other across a floor gap at bottom-center.
   // Left bank: opening (its valley mouth) faces RIGHT. Our valley opens up;
@@ -323,17 +347,17 @@ export function WestminsterDiagram({
   const extOf = (slots: Slot[]) => {
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     for (const s of slots) { x0 = Math.min(x0, s.x); x1 = Math.max(x1, s.x); y0 = Math.min(y0, s.y); y1 = Math.max(y1, s.y); }
+    if (slots.length === 0) return { x0: 0, x1: 0, y0: 0, y1: 0 };
     return { x0, x1, y0, y1 };
   };
   const gExt = extOf(govSlots);
   const oExt = extOf(oppSlots);
   const cExt = extOf(crossSlots);
 
-  const floorW = mode === 'cor' ? 210 : 250;   // clear floor gap between banks
   const pad = 66;
-  const leftW = gExt.x1 - gExt.x0 + 2 * seatR;
-  const rightW = oExt.x1 - oExt.x0 + 2 * seatR;
-  const W = Math.round(pad + leftW + floorW + rightW + pad);
+  const leftW = govN + supN > 0 ? gExt.x1 - gExt.x0 + 2 * seatR : 0;
+  const rightW = oppN > 0 ? oExt.x1 - oExt.x0 + 2 * seatR : 0;
+  const W = Math.round(pad + Math.max(leftW, 60) + floorW + Math.max(rightW, 0) + pad);
   const crossZoneH = crossN > 0 ? cExt.y1 - cExt.y0 + 2 * seatR + 26 : 0;
   const H = Math.round(crossZoneH + Math.max(gExt.y1 - gExt.y0, oExt.y1 - oExt.y0) + 2 * seatR + pad + 54);
 
@@ -370,8 +394,9 @@ export function WestminsterDiagram({
   const seats: SeatDatum[] = [];
   const owners: string[] = [];
   const pushBank = (slots: Slot[], orderedOwner: { allianceId: string }[], ox: number, oy: number) => {
-    slots.forEach((s, i) => {
-      const owner = orderedOwner[i]?.allianceId ?? orderedOwner[orderedOwner.length - 1]?.allianceId ?? '';
+    if (orderedOwner.length === 0) return;
+    slots.slice(0, orderedOwner.length).forEach((s, i) => {
+      const owner = orderedOwner[i].allianceId;
       const al = allianceById.get(owner);
       const bloc = blocOf.get(owner);
       seats.push({

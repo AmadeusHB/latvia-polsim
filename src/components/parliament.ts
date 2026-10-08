@@ -28,7 +28,7 @@ export function rowCapacities(radii: number[], sweep: number, pitch: number, N: 
 // Center (cx=0, cy=0) sits ABOVE the band; rows arc BELOW it, opening upward.
 // Angles: left end (t=0) at PI (x<0), bottom (t=.5) at PI/2, right end (t=1) at 0.
 // y = sin(a)*r > 0 → below the center → the band dips down = VALLEY. ---
-export function valleyPositions(N: number, seatR: number, rowsWanted: number, sweep = Math.PI) {
+export function valleyPositions(N: number, seatR: number, rowsWanted: number, sweep = Math.PI, centered = false) {
   const pitch = 2 * seatR + 2.2;
   const gap = 2 * seatR + 2.4;
   const minInner = 6 * seatR;
@@ -58,7 +58,13 @@ export function valleyPositions(N: number, seatR: number, rowsWanted: number, sw
     const ks = dir === 1 ? [...Array(row.c).keys()] : [...Array(row.c).keys()].reverse();
     for (const k of ks) {
       const t = (k + 0.5) / row.c;
-      const a = sweep * (1 - t);
+      // Default: arc runs a ∈ [0, sweep] (arms at y=0 for the full semicircle).
+      // Centered: arc runs a ∈ [90°-sweep/2, 90°+sweep/2] — both arm ends equally
+      // high — so a 90°-rotated bank only spans its band depth plus a small
+      // droop instead of jutting a full radius sideways.
+      const a = centered
+        ? (Math.PI / 2) + (sweep / 2) * (1 - 2 * t)
+        : sweep * (1 - t);
       slots.push({ x: Math.cos(a) * row.r, y: Math.sin(a) * row.r, t, r: row.r });
     }
   });
@@ -71,8 +77,18 @@ export function valleyPositions(N: number, seatR: number, rowsWanted: number, sw
 // the left side of the chamber and faces the floor at bottom-center;
 // mirror=-1 mirrors x for the right side. Positions are returned relative
 // to the arc's own circle center; the caller offsets to the chamber. ---
-export function bankPositions(N: number, seatR: number, rowsWanted: number, sweep: number, mirror: 1 | -1 = 1) {
-  const base = valleyPositions(N, seatR, rowsWanted, sweep);
+export function bankPositions(N: number, seatR: number, rowsWanted: number, sweep: number, mirror: 1 | -1 = 1, centered = false) {
+  const base = valleyPositions(N, seatR, rowsWanted, sweep, centered);
+  if (mirror === -1) {
+    for (const s of base.slots) s.x = -s.x;
+  }
+  return base;
+}
+
+// Centered-sweep bank: arc centered on the bottom of the circle (a=90°),
+// so rotated banks are compact. mirror=-1 flips for the right side.
+export function bankPositionsCentered(N: number, seatR: number, rowsWanted: number, sweep: number, mirror: 1 | -1 = 1) {
+  const base = valleyPositions(N, seatR, rowsWanted, sweep, true);
   if (mirror === -1) {
     for (const s of base.slots) s.x = -s.x;
   }
