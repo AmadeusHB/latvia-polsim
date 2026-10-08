@@ -144,14 +144,17 @@ export function buildArc(
     }
   }
 
-    // ---- Step 3: wedge allocation ----
-  // Each alliance occupies the SAME FRACTION of EVERY row (its national seat
-  // share), so its per-row slices stack into one vertical wedge. Boundary
-  // indices per row are rounded to the ideal share, then a correction pass
-  // shifts single boundaries by one slot to make every alliance's rendered
-  // total EXACT while keeping every slice contiguous and the order identical
-  // in every row.
-  const ownership = allocateWedges(orderedParties, rowCounts);
+    // ---- Step 3: concentrated wedge allocation ----
+  // Large parties occupy a full wedge (present in every row). Minor parties
+  // get a CONTIGUOUS WINDOW of rows (window length = their seat count), so a
+  // 5-seat party forms one compact block of 5 rows instead of scattered
+  // islands. Falls back to the proportional allocator only if both
+  // concentrated modes are infeasible (with a visible console.warn).
+  const { layout: ownership, stage } = allocateSaeimaSeats(
+    orderedParties.map((p) => p.seats),
+    rowCounts,
+  );
+  assertArcWedges(orderedParties, rowCounts, ownership, stage);
   const rowSeats: Seat[][] = radii.map((_, i) => Array.from({ length: rowCounts[i] }, () => ({ x: 0, y: 0, allianceId: '' })));
   for (let i = 0; i < K; i++) {
     for (let k = 0; k < rowCounts[i]; k++) {
@@ -180,7 +183,7 @@ export function buildArc(
   const H = Math.round(cy + rOuter + seatR + pad + 26);
 
   assertArcOrientation(rowSeats, { x: cx, y: cy });
-  assertArcWedges(orderedParties, rowCounts, ownership);
+  assertArcWedges(orderedParties, rowCounts, ownership, stage);
 
   return { seats, seatR, cell, K, radii, rowCounts, cx, cy, W, H, pad };
 }
@@ -275,6 +278,179 @@ export function allocateWedges(alliances: { id: string; seats: number }[], rows:
   return out;
 }
 
+class Infeasible extends Error {}
+
+// Concentrated wedges: each party is present in every row (full wedge) or in
+// one contiguous window of rows (compact minor-party block). Presence plan,
+// Sainte-Lague-style water-fill per party, then augmenting-path flow
+// correction until every row total is exact. mode 0 places block parties
+// largest-first with fixed window length; mode 1 retries smallest-first
+// with windows allowed to shrink to half.
+function allocateConcentratedWedges(
+  seatsPerParty: number[],
+  seatsPerRow: number[],
+  mode: number,
+): number[][] {
+  const S = seatsPerParty, n = seatsPerRow;
+  const P = S.length, R = n.length;
+  const N = S.reduce((a, b) => a + b, 0);
+  if (N !== n.reduce((a, b) => a + b, 0)) throw new Infeasible('TOTAL');
+  if (P === 0 || R === 0) throw new Infeasible('EMPTY');
+
+  // ---- STEP A: presence plan ----
+  const present: boolean[][] = Array.from({ length: P }, () => new Array(R).fill(false));
+  const load = new Array(R).fill(0);
+  const blockParties: number[] = [];
+  for (let p = 0; p < P; p++) {
+    if (S[p] <= 0) continue;
+    if (S[p] >= R) {
+      for (let i = 0; i < R; i++) { present[p][i] = true; load[i]++; }
+    } else {
+      blockParties.push(p);
+    }
+  }
+  for (let i = 0; i < R; i++) if (load[i] > n[i]) throw new Infeasible('PRESENCE-CAP');
+
+  const order = mode === 0
+    ? blockParties.slice().sort((a, b) => (S[b] - S[a]) || (a - b))
+    : blockParties.slice().sort((a, b) => (S[a] - S[b]) || (a - b));
+
+  for (const p of order) {
+    const Lmax = Math.min(S[p], R);
+    const Lmin = mode === 0 ? Lmax : Math.max(1, Math.ceil(Lmax / 2));
+    let placed = false;
+    for (let L = Lmax; L >= Lmin && !placed; L--) {
+      let bestW = -1;
+      let bestKey: number[] | null = null;
+      for (let w = 0; w + L <= R; w++) {
+        let ok = true, fill = 0, cap = 0;
+        for (let i = w; i < w + L; i++) {
+          if (load[i] + 1 > n[i]) { ok = false; break; }
+          fill += load[i]; cap += n[i];
+        }
+        if (!ok) continue;
+        const key = [fill, -cap, w];
+        if (bestKey === null || key[0] < bestKey[0] ||
+            (key[0] === bestKey[0] && (key[1] < bestKey[1] ||
+              (key[1] === bestKey[1] && key[2] < bestKey[2])))) {
+          bestKey = key; bestW = w;
+        }
+      }
+      if (bestW >= 0) {
+        for (let i = bestW; i < bestW + L; i++) { present[p][i] = true; load[i]++; }
+        placed = true;
+      }
+    }
+    if (!placed) throw new Infeasible('PRESENCE ' + p);
+  }
+
+  // ---- STEP B: exact apportionment (water-fill) ----
+  const m: number[][] = Array.from({ length: P }, () => new Array(R).fill(0));
+  for (let p = 0; p < P; p++)
+    for (let i = 0; i < R; i++) if (present[p][i]) m[p][i] = 1;
+  for (let p = 0; p < P; p++) {
+    if (S[p] <= 0) continue;
+    const rows: number[] = [];
+    for (let i = 0; i < R; i++) if (present[p][i]) rows.push(i);
+    let rem = S[p] - rows.length;
+    while (rem > 0) {
+      let bi = -1, bs = -Infinity;
+      for (const i of rows) {
+        const score = (S[p] * n[i] / N) / (m[p][i] + 0.5);
+        if (score > bs) { bs = score; bi = i; }
+      }
+      m[p][bi]++; rem--;
+    }
+  }
+
+  // ---- STEP C: row-sum correction (augmenting paths) ----
+  const rowLoad = new Array(R).fill(0);
+  const presenceCount = new Array(R).fill(0);
+  for (let i = 0; i < R; i++) {
+    let seats = 0, parties = 0;
+    for (let p = 0; p < P; p++) if (present[p][i]) { seats += m[p][i]; parties++; }
+    rowLoad[i] = seats; presenceCount[i] = parties;
+  }
+  let guard = 0;
+  while (true) {
+    let d = -1;
+    for (let i = 0; i < R; i++) if (rowLoad[i] < n[i]) { d = i; break; }
+    if (d < 0) break;
+    if (++guard > 5000) throw new Infeasible('FLOWLOOP');
+    const prevRow = new Array(R).fill(-1);
+    const prevParty = new Array(R).fill(-1);
+    const seen = new Array(R).fill(false);
+    seen[d] = true;
+    const queue: number[] = [d];
+    let found = -1;
+    while (queue.length > 0 && found < 0) {
+      const u = queue.shift()!;
+      for (let p = 0; p < P && found < 0; p++) {
+        if (!present[p][u]) continue;
+        if (m[p][u] + 1 > n[u] - (presenceCount[u] - 1)) continue;
+        for (let v = 0; v < R; v++) {
+          if (v === u || seen[v] || !present[p][v]) continue;
+          if (m[p][v] < 2) continue;
+          seen[v] = true; prevRow[v] = u; prevParty[v] = p;
+          if (rowLoad[v] > n[v]) { found = v; break; }
+          queue.push(v);
+        }
+      }
+    }
+    if (found < 0) throw new Infeasible('FLOW ' + d);
+    let v = found;
+    while (v !== d) {
+      const u = prevRow[v], p = prevParty[v];
+      m[p][u]++; m[p][v]--;
+      rowLoad[u]++; rowLoad[v]--;
+      v = u;
+    }
+  }
+  for (let i = 0; i < R; i++) if (rowLoad[i] !== n[i]) throw new Infeasible('ROWSUM');
+
+  // ---- STEP D: layout ----
+  const layout: number[][] = [];
+  for (let i = 0; i < R; i++) {
+    const row: number[] = new Array(n[i]).fill(-1);
+    let pos = 0;
+    for (let p = 0; p < P; p++) {
+      if (!present[p][i]) continue;
+      for (let k = 0; k < m[p][i]; k++) row[pos + k] = p;
+      pos += m[p][i];
+    }
+    if (pos !== n[i]) throw new Infeasible('ROWLEN');
+    layout.push(row);
+  }
+  return layout;
+}
+
+// Fallback ladder: concentrated mode 0, then mode 1, then the previous
+// proportional allocator. The fallback is never silent: it warns.
+export function allocateSaeimaSeats(
+  seatsPerParty: number[],
+  seatsPerRow: number[],
+): { layout: number[][]; stage: string } {
+  try {
+    return { layout: allocateConcentratedWedges(seatsPerParty, seatsPerRow, 0), stage: 'concentrated-0' };
+  } catch (e1) {
+    try {
+      return { layout: allocateConcentratedWedges(seatsPerParty, seatsPerRow, 1), stage: 'concentrated-1' };
+    } catch (e2) {
+      console.warn(
+        'Concentrated wedge allocator infeasible, using proportional allocator. Reasons:',
+        String(e1), '|', String(e2),
+      );
+      return {
+        layout: allocateWedges(
+          seatsPerParty.map((seats, p) => ({ id: String(p), seats })),
+          seatsPerRow,
+        ),
+        stage: 'fallback',
+      };
+    }
+  }
+}
+
 // --- Mandatory orientation self-test (SECTION 2) ---
 export function assertArcOrientation(
   rows: { x: number; y: number }[][],
@@ -295,40 +471,45 @@ export function assertArcOrientation(
     throw new Error('Arc sideways or flipped: lowest seat not centered');
 }
 
-// --- Dev-time wedge assertions (SECTION 3) ---
+// --- Dev-time wedge assertions (acceptance checks 1-5) ---
+// stage: 'concentrated-0' | 'concentrated-1' | 'fallback'. Islands are only
+// tolerated when the fallback allocator ran (it already warned visibly).
 export function assertArcWedges(
   alliances: { id: string; seats: number }[],
   rowCounts: number[],
   ownership: number[][],
+  stage: string,
 ): void {
   const P = alliances.length;
   const N = alliances.reduce((s, a) => s + a.seats, 0);
-  const cum = [0];
-  for (let p = 0; p < P; p++) cum.push(cum[p] + alliances[p].seats);
   const fails: string[] = [];
   const counts = new Array(P).fill(0);
+  const rowsOfParty: number[][] = Array.from({ length: P }, () => []);
   for (let i = 0; i < rowCounts.length; i++) {
     const arr = ownership[i];
     if (arr.length !== rowCounts[i]) fails.push(`row ${i}: length ${arr.length} != ${rowCounts[i]}`);
-    const seen: number[] = []
-    for (const p of arr) if (seen[seen.length - 1] !== p) seen.push(p);
-    for (let p = 1; p < seen.length; p++)
-      if (seen[p] <= seen[p - 1]) { fails.push(`row ${i}: order ${seen} not ascending`); break; }
-    for (const p of seen) counts[p] += arr.filter((x) => x === p).length;
+    let prev = -1;
     for (let k = 0; k < arr.length; k++) {
       const p = arr[k];
-      const u = (k + 0.5) / arr.length;
-      if (u < cum[p] / N - 4 / arr.length || u > (cum[p] + alliances[p].seats) / N + 4 / arr.length)
-        fails.push(`row ${i} slot ${k}: u=${u.toFixed(3)} outside share of alliance ${alliances[p].id}`);
+      if (p < prev) fails.push(`row ${i} slot ${k}: party order not ascending`);
+      prev = p;
+      counts[p]++;
+      if (rowsOfParty[p][rowsOfParty[p].length - 1] !== i) rowsOfParty[p].push(i);
     }
   }
-  for (let p = 0; p < P; p++)
+  for (let p = 0; p < P; p++) {
     if (counts[p] !== alliances[p].seats)
       fails.push(`alliance ${alliances[p].id}: rendered ${counts[p]} != entered ${alliances[p].seats}`);
+    const rows = rowsOfParty[p];
+    let islands = 0;
+    for (let q = 1; q < rows.length; q++) if (rows[q] !== rows[q - 1] + 1) islands++;
+    if (islands > 0 && stage !== 'fallback')
+      fails.push(`alliance ${alliances[p].id}: ${islands} island(s), rows ${rows}`);
+  }
   if (counts.reduce((a, b) => a + b, 0) !== N)
     fails.push(`grand total ${counts.reduce((a, b) => a + b, 0)} != ${N}`);
   if (fails.length)
-    console.warn('[arc] wedge assertion failures:\n' + fails.join('\n'));
+    console.warn(`[arc:${stage}] wedge assertion failures:\n` + fails.join('\n'));
 }
 
 
