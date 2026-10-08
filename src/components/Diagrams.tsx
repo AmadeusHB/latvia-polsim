@@ -33,8 +33,6 @@ export function arcOrder(computed: ReturnType<typeof computeAlliances>): string[
 
 interface SeatXY { x: number; y: number; row: number; allianceId: string; }
 
-// Parliament-style curved arc rows. Seats flow left→right along the arc,
-// grouped per alliance in `order`. Angles in radians; 180° = left end.
 function layoutArcRows(
   seatAssign: { allianceId: string }[],
   opts: { cx: number; cy: number; r0: number; rowGap: number; seatR: number; a0: number; a1: number },
@@ -42,8 +40,6 @@ function layoutArcRows(
   const { cx, cy, r0, rowGap, seatR, a0, a1 } = opts;
   const seats: SeatXY[] = [];
   if (seatAssign.length === 0) return seats;
-  // Row capacity: seats per row limited by arc length; keep adding rows until
-  // all seats fit (parliament graphics typically use 8–12 rows for 300 seats).
   const seatPitch = 2 * seatR + 3;
   const maxRows = Math.floor(r0 / rowGap);
   const rowsNeeded = (() => {
@@ -58,8 +54,6 @@ function layoutArcRows(
     return maxRows;
   })();
   const rows2 = rowsNeeded;
-  // distribute seats: outer rows get proportionally more (arc length grows with r),
-  // but never more than the row's physical capacity.
   const perRow: number[] = [];
   const radii: number[] = [];
   for (let r = 0; r < rows2; r++) radii.push(r0 - r * rowGap);
@@ -71,8 +65,6 @@ function layoutArcRows(
     perRow.push(n);
     remaining -= n;
   }
-  // Fail-safe: if rounding dropped seats, place them on the widest row anyway
-  // (slightly tighter than ideal but guarantees every seat is drawn).
   const assigned = perRow.reduce((s, x) => s + x, 0);
   if (assigned < seatAssign.length && perRow.length > 0) {
     perRow[0] += seatAssign.length - assigned;
@@ -99,6 +91,7 @@ function layoutArcRows(
 
 function Legend({ scenario, entries }: { scenario: Scenario; entries: { id: string; seats: number }[] }) {
   const byId = new Map(scenario.alliances.map((a) => [a.id, a]));
+  const total = entries.reduce((s, e) => s + e.seats, 0);
   return (
     <div className="parliament-legend">
       {entries.map(({ id, seats }) => {
@@ -108,9 +101,28 @@ function Legend({ scenario, entries }: { scenario: Scenario; entries: { id: stri
           <span key={id} className="legend-item">
             <span className="legend-dot" style={{ background: a.color }} />
             {a.name} <strong>{seats}</strong>
+            <span className="subtle" style={{ margin: 0 }}>({(100 * seats / total).toFixed(1)}%)</span>
           </span>
         );
       })}
+    </div>
+  );
+}
+
+// Chamber card wrapper: title bar + svg + legend
+function ChamberCard({
+  title, subtitle, swatch, children,
+}: { title: string; subtitle: string; swatch: string; children: React.ReactNode }) {
+  return (
+    <div className="diagram-card">
+      <div className="diagram-head">
+        <div className="diagram-title">
+          <span className="chamber-swatch" style={{ background: swatch }} />
+          {title}
+        </div>
+        <div className="diagram-sub">{subtitle}</div>
+      </div>
+      <div className="diagram-body">{children}</div>
     </div>
   );
 }
@@ -123,41 +135,59 @@ export function SaeimaArc({ scenario }: { scenario: Scenario }) {
   const computed = computeAlliances(scenario);
   const order = arcOrder(computed);
   const seatAssign: { allianceId: string }[] = [];
+  const seatsOf = (aid: string) => scenario.parties.filter((p) => p.allianceId === aid).reduce((sum, p) => sum + p.saeimaSeats, 0);
   for (const aid of order) {
-    const seats = scenario.parties.filter((p) => p.allianceId === aid).reduce((sum, p) => sum + p.saeimaSeats, 0);
-    for (let k = 0; k < seats; k++) seatAssign.push({ allianceId: aid });
+    for (let k = 0; k < seatsOf(aid); k++) seatAssign.push({ allianceId: aid });
   }
   const total = seatAssign.length;
-  if (total === 0) return <div className="empty-note">No Saeima seats entered yet.</div>;
-
-  const W = 920, H = 480, cx = W / 2, cy = H - 30;
-  const seats = layoutArcRows(seatAssign, { cx, cy, r0: 390, rowGap: 26, seatR: 7.5, a0: Math.PI * 0.03, a1: Math.PI * 0.97 });
+  if (total === 0) return (
+    <ChamberCard title="Saeima" subtitle="no seats entered" swatch="linear-gradient(180deg,#3457d5,#7b96ec)">
+      <div className="empty-note">No Saeima seats entered yet.</div>
+    </ChamberCard>
+  );
+  const W = 920, H = 500, cx = W / 2, cy = H - 44;
+  const seats = layoutArcRows(seatAssign, { cx, cy, r0: 390, rowGap: 27, seatR: 7.5, a0: Math.PI * 0.03, a1: Math.PI * 0.97 });
   const byId = new Map(scenario.alliances.map((a) => [a.id, a]));
-  const entries = order.map((aid) => ({ id: aid, seats: scenario.parties.filter((p) => p.allianceId === aid).reduce((sum, p) => sum + p.saeimaSeats, 0) }))
-    .filter((e) => e.seats > 0);
+  const entries = order.map((aid) => ({ id: aid, seats: seatsOf(aid) })).filter((e) => e.seats > 0);
+  const majority = Math.floor(301 / 2) + 1;
 
   return (
-    <div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="diagram">
-        {/* subtle backdrop arc */}
-        <path d={`M ${cx - 400} ${cy} A 400 400 0 0 1 ${cx + 400} ${cy}`} fill="none" stroke="#eef2f7" strokeWidth="26" />
+    <ChamberCard
+      title="Saeima"
+      subtitle={`${total} of 301 seats · ${entries.length} alliances · majority at ${majority}`}
+      swatch="linear-gradient(180deg,#3457d5,#7b96ec)"
+    >
+      <svg viewBox={`0 0 ${W} ${H}`} className="diagram" role="img" aria-label="Saeima seat diagram">
+        <defs>
+          <radialGradient id="centerEmblem" cx="50%" cy="42%">
+            <stop offset="0%" stopColor="#ffffff" />
+            <stop offset="100%" stopColor="#f0f2f7" />
+          </radialGradient>
+        </defs>
+        {/* soft backdrop arc */}
+        <path d={`M ${cx - 402} ${cy} A 402 402 0 0 1 ${cx + 402} ${cy}`} fill="none" stroke="#eef1f6" strokeWidth={30} strokeLinecap="round" />
+        {/* majority tick at center-top */}
+        <line x1={cx - 6} y1={cy - 404} x2={cx + 6} y2={cy - 404} stroke="#c3c9d8" strokeWidth={2} />
+        <text x={cx} y={cy - 412} textAnchor="middle" className="svg-sub">50%</text>
         {seats.map((s, i) => {
           const a = byId.get(s.allianceId);
           return (
-            <circle key={i} cx={s.x} cy={s.y} r={8}
-              fill={a?.color ?? '#999'} stroke="#ffffff" strokeWidth={1}>
-              <title>{a?.name ?? s.allianceId}</title>
+            <circle key={i} cx={s.x} cy={s.y} r={7.6}
+              fill={a?.color ?? '#999'} stroke="#ffffff" strokeWidth={0.9}>
+              <title>{a?.name ?? s.allianceId} — {seatsOf(s.allianceId)} seats</title>
             </circle>
           );
         })}
-        <text x={cx - 330} y={H - 6} className="axis-label" textAnchor="middle">← Left</text>
-        <text x={cx + 330} y={H - 6} className="axis-label" textAnchor="middle">Right →</text>
-        <text x={cx} y={H - 6} className="axis-label" textAnchor="middle" fontWeight="600">
-          Saeima — {total}/301 seats
-        </text>
+        {/* center emblem */}
+        <circle cx={cx} cy={cy - 150} r={74} fill="url(#centerEmblem)" stroke="#e4e8f0" />
+        <text x={cx} y={cy - 158} textAnchor="middle" className="svg-title" fontSize={19}>Saeima</text>
+        <text x={cx} y={cy - 136} textAnchor="middle" className="svg-sub">Republic of Latvia</text>
+        <text x={cx} y={cy - 112} textAnchor="middle" fontSize={15} fontWeight={800} fill="#16192b">{total}<tspan fontSize={11} fill="#8b93a7"> / 301</tspan></text>
+        <text x={cx - 355} y={H - 10} className="axis-label" textAnchor="middle">← Left</text>
+        <text x={cx + 355} y={H - 10} className="axis-label" textAnchor="middle">Right →</text>
       </svg>
       <Legend scenario={scenario} entries={entries} />
-    </div>
+    </ChamberCard>
   );
 }
 
@@ -166,6 +196,13 @@ export function SaeimaArc({ scenario }: { scenario: Scenario }) {
 // ============================================================
 
 type Sec = 'gov' | 'supply' | 'cross' | 'opp';
+
+const SEC_STYLE: Record<Sec, { label: string; color: string }> = {
+  gov: { label: 'Government', color: '#1d4ed8' },
+  supply: { label: 'Supply & Confidence', color: '#0e7490' },
+  cross: { label: 'Cross-bench', color: '#64748b' },
+  opp: { label: 'Opposition', color: '#b91c1c' },
+};
 
 export function WestminsterDiagram({
   scenario, results, mode,
@@ -190,7 +227,13 @@ export function WestminsterDiagram({
       if (aid) seatList.push({ allianceId: aid, weight: 2 });
     }
   }
-  if (seatList.length === 0) return <div className="empty-note">Run a simulation first.</div>;
+  const emptySubtitle = mode === 'cor' ? '150 seats' : '18 governors · 2 votes each in joint session';
+  if (seatList.length === 0) return (
+    <ChamberCard title={mode === 'cor' ? 'Council of Regions' : 'Council of Governors'} subtitle={emptySubtitle}
+      swatch={mode === 'cor' ? 'linear-gradient(180deg,#1a7f4e,#57c08a)' : 'linear-gradient(180deg,#9e2b3c,#d4704f)'}>
+      <div className="empty-note">Run a simulation first.</div>
+    </ChamberCard>
+  );
 
   const secOf = new Map<string, Sec>();
   for (const a of scenario.alliances) {
@@ -199,21 +242,18 @@ export function WestminsterDiagram({
   }
   const blocOrder = new Map<string, number>();
   order.forEach((aid, i) => blocOrder.set(aid, i));
-
   const groups: Record<Sec, { allianceId: string; weight: number }[]> = { gov: [], supply: [], cross: [], opp: [] };
   for (const sec of Object.keys(groups) as Sec[]) {
     groups[sec] = seatList.filter((s) => secOf.get(s.allianceId) === sec)
       .sort((a, b) => (blocOrder.get(a.allianceId) ?? 99) - (blocOrder.get(b.allianceId) ?? 99));
   }
 
-  const W = 960, H = 500, cx = W / 2, cy = H - 46;
-  const seatR = mode === 'cor' ? 8 : 20;
+  const W = 960, H = 520, cx = W / 2, cy = H - 52;
+  const seatR = mode === 'cor' ? 8.2 : 19;
   const seats: (SeatXY & { sec: Sec })[] = [];
+  const rowGap = mode === 'cor' ? 21 : 54;
+  const rBase = mode === 'cor' ? 352 : 302;
 
-  // Section wedges: gov from 190°, opp ends at 350°, cross at top. Seats packed
-  // along concentric rows inside each wedge, clustered (wedge width ∝ seats).
-  const rowGap = mode === 'cor' ? 20 : 52;
-  const rBase = mode === 'cor' ? 350 : 300;
   const packSection = (sec: Sec, center: number, list: { allianceId: string }[]) => {
     if (list.length === 0) return;
     const rowsN = mode === 'cor' ? 4 : 2;
@@ -225,7 +265,6 @@ export function WestminsterDiagram({
       const n = r === rowsN - 1 ? remaining : Math.min(remaining, Math.ceil(list.length / rowsN));
       perRow.push(n); remaining -= n;
     }
-    // wedge width from widest row
     const maxN = Math.max(...perRow);
     const width = (maxN * 2 * (seatR + 1.6)) / rBase;
     let idx = 0;
@@ -242,7 +281,6 @@ export function WestminsterDiagram({
     }
   };
 
-  // Place: gov left-of-top, opp right-of-top, cross at apex, supply hugging gov.
   const govList = groups.gov.map((s) => ({ allianceId: s.allianceId }));
   const oppList = groups.opp.map((s) => ({ allianceId: s.allianceId }));
   const crossList = groups.cross.map((s) => ({ allianceId: s.allianceId }));
@@ -254,51 +292,98 @@ export function WestminsterDiagram({
   packSection('opp', angDeg(335), oppList);
 
   const totalWeight = mode === 'cog' ? seatList.reduce((s, x) => s + x.weight, 0) : seatList.length;
+  const govWeighted = groups.gov.reduce((s, x) => s + x.weight, 0) + groups.supply.reduce((s, x) => s + x.weight, 0);
   const secEntries = (sec: Sec) => {
     const ids = [...new Set(groups[sec].map((s) => s.allianceId))];
     return ids.map((id) => ({ id, seats: groups[sec].filter((s) => s.allianceId === id).length }));
   };
 
+  const title = mode === 'cor' ? 'Council of Regions' : 'Council of Governors';
+  const subtitle = mode === 'cor'
+    ? `${seats.length} of 150 seats · ${groups.gov.length} government · ${groups.opp.length} opposition`
+    : `${seats.length} governors · ${totalWeight} weighted votes · government+supply ${govWeighted}`;
+
   return (
-    <div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="diagram">
-        <path d={`M ${cx - rBase - 14} ${cy} A ${rBase + 14} ${rBase + 14} 0 0 1 ${cx + rBase + 14} ${cy}`} fill="none" stroke="#eef2f7" strokeWidth={mode === 'cor' ? 22 : 40} />
+    <ChamberCard title={title} subtitle={subtitle}
+      swatch={mode === 'cor' ? 'linear-gradient(180deg,#1a7f4e,#57c08a)' : 'linear-gradient(180deg,#9e2b3c,#d4704f)'}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="diagram" role="img" aria-label={`${title} seat diagram`}>
+        <defs>
+          <radialGradient id={`center-${mode}`} cx="50%" cy="40%">
+            <stop offset="0%" stopColor="#ffffff" />
+            <stop offset="100%" stopColor="#f0f2f7" />
+          </radialGradient>
+        </defs>
+        {/* backdrop */}
+        <path d={`M ${cx - rBase - 15} ${cy} A ${rBase + 15} ${rBase + 15} 0 0 1 ${cx + rBase + 15} ${cy}`}
+          fill="none" stroke="#eef1f6" strokeWidth={mode === 'cor' ? 24 : 46} strokeLinecap="round" />
+        {/* section dividers (radial ticks between wedges) */}
+        {[
+          { deg: 188, on: groups.gov.length > 0 },
+          { deg: 218, on: groups.supply.length > 0 },
+          { deg: 252, on: groups.supply.length > 0 && groups.cross.length > 0 },
+          { deg: 288, on: groups.cross.length > 0 },
+          { deg: 322, on: groups.opp.length > 0 },
+        ].filter((t) => t.on).map((t, i) => {
+          const r1 = rBase + 4 * rowGap - 6;
+          const r2 = rBase + 18;
+          const a = angDeg(t.deg);
+          return (
+            <line key={i} x1={cx + r1 * Math.cos(a)} y1={cy + r1 * Math.sin(a)}
+              x2={cx + r2 * Math.cos(a)} y2={cy + r2 * Math.sin(a)}
+              stroke="#d4d9e4" strokeWidth={1.5} />
+          );
+        })}
         {seats.map((s, i) => {
           const al = allianceById.get(s.allianceId);
           const bloc = blocOf.get(s.allianceId);
-          const outline = bloc ? bloc.color : '#9aa4b2';
+          const outline = bloc ? bloc.color : '#aab1bf';
           return (
             <circle key={i} cx={s.x} cy={s.y} r={seatR}
               fill={al?.color ?? '#bbb'} stroke={outline} strokeWidth={mode === 'cor' ? 2 : 4.5}>
-              <title>{al?.name}{bloc ? ` (${bloc.name})` : ''}</title>
+              <title>{al?.name}{bloc ? ` (${bloc.name})` : ''}{mode === 'cog' ? ' · 2 votes' : ''}</title>
             </circle>
           );
         })}
         {mode === 'cog' && seats.map((s, i) => (
-          <text key={'t' + i} x={s.x} y={s.y + 4} textAnchor="middle" fontSize="11" fill="#fff" fontWeight="700">2×</text>
+          <text key={'t' + i} x={s.x} y={s.y + 4} textAnchor="middle" fontSize="11.5" fill="#fff" fontWeight={800}>2×</text>
         ))}
-        <text x={W * 0.13} y={H - 8} className="axis-label" fill="#1d4ed8" fontWeight="600">Government</text>
-        {groups.supply.length > 0 && <text x={W * 0.30} y={H - 8} className="axis-label" fill="#0e7490" fontWeight="600">Supply &amp; Confidence</text>}
-        {groups.cross.length > 0 && <text x={W / 2} y={H - 8} className="axis-label" fill="#52525b" fontWeight="600">Cross-bench</text>}
-        <text x={W * 0.85} y={H - 8} className="axis-label" fill="#b91c1c" fontWeight="600">Opposition</text>
-        <text x={W / 2} y={20} textAnchor="middle" className="axis-label" fontWeight="700">
-          {mode === 'cor'
-            ? `Council of Regions — ${seats.length} of 150 seats`
-            : `Council of Governors — ${seats.length} governors · ${totalWeight} weighted votes (2× each)`}
+        {/* center emblem */}
+        <circle cx={cx} cy={cy - 128} r={mode === 'cor' ? 62 : 74} fill={`url(#center-${mode})`} stroke="#e4e8f0" />
+        <text x={cx} y={cy - (mode === 'cor' ? 134 : 140)} textAnchor="middle" className="svg-title" fontSize={mode === 'cor' ? 15 : 17}>
+          {mode === 'cor' ? 'CoR' : 'CoG'}
         </text>
+        <text x={cx} y={cy - (mode === 'cor' ? 116 : 118)} textAnchor="middle" className="svg-sub">
+          {mode === 'cor' ? 'Council of Regions' : 'Council of Governors'}
+        </text>
+        <text x={cx} y={cy - (mode === 'cor' ? 96 : 96)} textAnchor="middle" fontSize={16} fontWeight={800} fill="#16192b">
+          {mode === 'cor' ? seats.length : `${totalWeight}`}
+          <tspan fontSize={11} fill="#8b93a7">{mode === 'cor' ? ' / 150' : ' joint votes'}</tspan>
+        </text>
+        {/* section labels */}
+        {(['gov', 'supply', 'cross', 'opp'] as Sec[]).map((sec) => {
+          if (groups[sec].length === 0) return null;
+          const positions: Record<Sec, number> = { gov: 0.115, supply: 0.29, cross: 0.5, opp: 0.845 };
+          return (
+            <text key={sec} x={W * positions[sec]} y={H - 12} textAnchor="middle"
+              className="divider-label" fill={SEC_STYLE[sec].color}>
+              {SEC_STYLE[sec].label} · {groups[sec].length}
+            </text>
+          );
+        })}
       </svg>
       <div className="legend-cols">
         {(['gov', 'supply', 'cross', 'opp'] as Sec[]).map((sec) => (
           groups[sec].length > 0 && (
             <div key={sec} className="legend-col">
               <div className="legend-title">
-                {sec === 'gov' ? 'Government' : sec === 'supply' ? 'Supply & Confidence' : sec === 'cross' ? 'Cross-bench' : 'Opposition'}
+                <span className="sec-dot" style={{ background: SEC_STYLE[sec].color }} />
+                {SEC_STYLE[sec].label} — {groups[sec].length}
               </div>
               <Legend scenario={scenario} entries={secEntries(sec)} />
             </div>
           )
         ))}
       </div>
-    </div>
+    </ChamberCard>
   );
 }

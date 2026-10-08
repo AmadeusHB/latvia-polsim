@@ -21,7 +21,13 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>🇱🇻 Latvia PolSim <span className="subtitle">CoR &amp; CoG Election Simulator</span></h1>
+        <div className="brand">
+          <div className="brand-mark">🇱🇻</div>
+          <div>
+            <h1>Latvia PolSim</h1>
+            <span className="subtitle">Council of Regions &amp; Council of Governors — Election Simulator</span>
+          </div>
+        </div>
         <nav className="tabs">
           {(['scenarios', 'parties', 'alliances', 'blocs', 'districts', 'overrides', 'weights', 'results'] as Tab[]).map((t) => (
             <button key={t} className={tab === t ? 'tab active' : 'tab'} onClick={() => setTab(t)}>

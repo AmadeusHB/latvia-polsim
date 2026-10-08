@@ -9,13 +9,14 @@ it('diagrams render with all seats', () => {
   const sc = mkScenario();
   const res = runSimulation(sc, defaultDistricts());
   const saeima = renderToString(<SaeimaArc scenario={sc} />);
-  const corSeats = (saeima.match(/<circle /g) ?? []).length;
+  // seat circles carry a <title> child; the center emblem does not
+  const corSeats = (saeima.match(/<circle [^>]*><title>/g) ?? []).length;
   expect(corSeats).toBe(301);
   const cor = renderToString(<WestminsterDiagram scenario={sc} results={res} mode="cor" />);
-  const corCount = (cor.match(/<circle /g) ?? []).length;
+  const corCount = (cor.match(/<circle [^>]*><title>/g) ?? []).length;
   expect(corCount).toBe(150);
   const cog = renderToString(<WestminsterDiagram scenario={sc} results={res} mode="cog" />);
-  const cogCount = (cog.match(/<circle /g) ?? []).length;
+  const cogCount = (cog.match(/<circle [^>]*><title>/g) ?? []).length;
   expect(cogCount).toBe(18);
   // legend present
   expect(cor).toContain('legend-item');
