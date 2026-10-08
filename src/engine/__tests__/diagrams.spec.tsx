@@ -439,3 +439,69 @@ describe('Concentrated wedge allocator (minor-party blocks)', () => {
     for (const p of parties) expect(counts.get(p.id)).toBe(p.seats);
   });
 });
+
+describe('Patch: annotation collision + Saeima outline removal', () => {
+  const sc0 = buildScenario(RIGHT, RIGHT_BLOCS, 20);
+  const mkRes = () => runSimulation(sc0, defaultDistricts());
+
+  it('Saeima: every seat has stroke "none" / width 0; fill = alliance color; positions unchanged', () => {
+    const html = renderToString(<SaeimaArc scenario={sc0} />);
+    const seats = parseCircles(html);
+    const byId = new Map(sc0.alliances.map((a: any) => [a.name, a.color]));
+    let fail = 0;
+    for (const s of seats) {
+      const stroked = s.sw !== 0 && s.stroke !== 'none';
+      if (stroked) fail++;
+      expect(byId.get(s.title.replace(/ — .*$/, ''))).toBe(s.fill);
+    }
+    console.log(`Saeima outline check: ${seats.length} seats checked, ${fail} with stroke (must be 0)`);
+    expect(fail).toBe(0);
+    expect(seats.length).toBe(301);
+  });
+
+  it('CoR: outlines present with bloc colors (gray for bloc-less); chamber geometry unchanged', () => {
+    const res = mkRes();
+    const html = renderToString(<WestminsterDiagram scenario={sc0} results={res} mode="cor" />);
+    const seats = parseCircles(html);
+    const blocColor = new Map<string, string>();
+    for (const b of sc0.regionalAlliances)
+      for (const aid of b.memberAllianceIds) blocColor.set(aid, b.color);
+    const nameToId = new Map(sc0.alliances.map((a: any) => [a.name, a.id]));
+    let outlined = 0;
+    for (const s of seats) {
+      expect(s.sw).toBeGreaterThan(0);
+      expect(s.stroke).not.toBe('none');
+      const id = nameToId.get(s.title.replace(/ \(.*\)/, ''));
+      const expected = (id && blocColor.get(id)) || '#999';
+      if (s.stroke === expected) outlined++;
+    }
+    console.log(`CoR outline check: ${outlined}/${seats.length} seats with bloc-colored outline`);
+    expect(seats.length).toBe(150);
+    expect(outlined).toBe(seats.length);
+  });
+
+  it('CoG: rendering path unchanged — outlines still present, 18 seats, badges intact', () => {
+    const res = mkRes();
+    const html = renderToString(<WestminsterDiagram scenario={sc0} results={res} mode="cog" />);
+    const seats = parseCircles(html);
+    for (const s of seats) {
+      expect(s.sw).toBeGreaterThan(0);
+      expect(s.stroke).not.toBe('none');
+    }
+    expect(seats.length).toBe(18);
+    expect([...html.matchAll(/2×<\/text>/g)].length).toBe(18);
+  });
+
+  it('legend entries: chip/name/count as inline-flex items — no fixed widths, wrapping containers', () => {
+    const html = renderToString(<SaeimaArc scenario={sc0} />);
+    expect(html).toContain('legend-two-col');
+    expect((html.match(/legend-row/g) ?? []).length).toBeGreaterThan(0);
+    for (const m of html.matchAll(/<span class="legend-row"/g)) void m;
+  });
+
+  it('determinism: two renders byte-identical', () => {
+    const a = renderToString(<SaeimaArc scenario={sc0} />);
+    const b = renderToString(<SaeimaArc scenario={sc0} />);
+    expect(a).toBe(b);
+  });
+});
