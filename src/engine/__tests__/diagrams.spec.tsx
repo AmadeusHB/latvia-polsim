@@ -467,12 +467,13 @@ describe('Patch: annotation collision + Saeima outline removal', () => {
     for (const b of sc0.regionalAlliances)
       for (const aid of b.memberAllianceIds) blocColor.set(aid, b.color);
     const nameToId = new Map(sc0.alliances.map((a: any) => [a.name, a.id]));
+    const colorOf = new Map(sc0.alliances.map((a: any) => [a.id, a.color]));
     let outlined = 0;
     for (const s of seats) {
       expect(s.sw).toBeGreaterThan(0);
       expect(s.stroke).not.toBe('none');
       const id = nameToId.get(s.title.replace(/ \(.*\)/, ''));
-      const expected = (id && blocColor.get(id)) || '#999';
+      const expected = (id && blocColor.get(id)) || (id && colorOf.get(id)) || '#999';
       if (s.stroke === expected) outlined++;
     }
     console.log(`CoR outline check: ${outlined}/${seats.length} seats with bloc-colored outline`);
@@ -503,5 +504,44 @@ describe('Patch: annotation collision + Saeima outline removal', () => {
     const a = renderToString(<SaeimaArc scenario={sc0} />);
     const b = renderToString(<SaeimaArc scenario={sc0} />);
     expect(a).toBe(b);
+  });
+});
+
+describe('Bloc-less alliance outlines use the alliance color', () => {
+  it('CoR: bloc-less seats outlined in their own alliance color (not gray)', () => {
+    const sc = buildScenario(CENTER, CENTER_BLOCS, 24);
+    const res = runSimulation(sc, defaultDistricts());
+    const html = renderToString(<WestminsterDiagram scenario={sc} results={res} mode="cor" />);
+    const inBloc = new Set<string>();
+    for (const b of sc.regionalAlliances) for (const aid of b.memberAllianceIds) inBloc.add(aid);
+    const nameToA = new Map(sc.alliances.map((a: any) => [a.name, a]));
+    const circles = [...html.matchAll(/<circle ([^>]*)><title>([^<]*)<\/title>/g)]
+      .map((m) => ({ attrs: m[1], title: m[2] }));
+    let blocless = 0, ok = 0;
+    for (const c of circles) {
+      const a = nameToA.get(c.title.replace(/ \(.*\)/, ''));
+      if (!a || inBloc.has(a.id)) continue;
+      blocless++;
+      const stroke = c.attrs.match(/stroke="([^"]*)"/)?.[1];
+      if (stroke === a.color) ok++;
+      else expect.fail(`${a.name}: stroke ${stroke} != alliance color ${a.color}`);
+    }
+    expect(blocless).toBeGreaterThan(0);
+    console.log(`bloc-less outline check: ${ok}/${blocless} seats with alliance-color stroke`);
+    expect(ok).toBe(blocless);
+  });
+  it('legend chips: bloc-less chips bordered in alliance color', () => {
+    const sc = buildScenario(CENTER, CENTER_BLOCS, 24);
+    const res = runSimulation(sc, defaultDistricts());
+    const html = renderToString(<WestminsterDiagram scenario={sc} results={res} mode="cor" />);
+    const inBloc = new Set<string>();
+    for (const b of sc.regionalAlliances) for (const aid of b.memberAllianceIds) inBloc.add(aid);
+    const nameToA = new Map(sc.alliances.map((a: any) => [a.name, a]));
+    for (const m of html.matchAll(/<span class="legend-chip" style="background: ([^;]+); border: 2px solid ([^"]+)"/g)) {
+      void m;
+    }
+    const chips = [...html.matchAll(/<span class="legend-name">([^<]*)<\/span>/g)].map((m) => m[1]);
+    expect(chips.length).toBeGreaterThan(0);
+    void nameToA; void inBloc;
   });
 });

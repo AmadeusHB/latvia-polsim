@@ -71,13 +71,14 @@ interface BlocVisuals {
 
 function useBlocVisuals(scenario: Scenario): BlocVisuals {
   const byId = new Map(scenario.alliances.map((a) => [a.id, a]));
+  const fillOfHelper = (id: string) => byId.get(id)?.color ?? '#bbb';
   const blocOf = new Map<string, { color: string; name: string }>();
   for (const b of scenario.regionalAlliances) {
     for (const a of b.memberAllianceIds) blocOf.set(a, { color: b.color, name: b.name });
   }
   return {
-    fillOf: (id) => byId.get(id)?.color ?? '#bbb',          // LAW 3: exact hex
-    strokeOf: (id) => blocOf.get(id)?.color ?? '#999',       // LAW 4
+    fillOf: fillOfHelper,                                   // LAW 3: exact hex
+    strokeOf: (id) => blocOf.get(id)?.color ?? byId.get(id)?.color ?? '#999',  // LAW 4: bloc color; bloc-less alliances use their own alliance color
     nameOf: (id) => byId.get(id)?.name ?? '',
   };
 }
