@@ -89,9 +89,9 @@ function layoutArcRows(
   return seats;
 }
 
-function Legend({ scenario, entries }: { scenario: Scenario; entries: { id: string; seats: number }[] }) {
+function Legend({ scenario, entries, total }: { scenario: Scenario; entries: { id: string; seats: number }[]; total?: number }) {
   const byId = new Map(scenario.alliances.map((a) => [a.id, a]));
-  const total = entries.reduce((s, e) => s + e.seats, 0);
+  const t = total ?? entries.reduce((s, e) => s + e.seats, 0);
   return (
     <div className="parliament-legend">
       {entries.map(({ id, seats }) => {
@@ -101,7 +101,7 @@ function Legend({ scenario, entries }: { scenario: Scenario; entries: { id: stri
           <span key={id} className="legend-item">
             <span className="legend-dot" style={{ background: a.color }} />
             {a.name} <strong>{seats}</strong>
-            <span className="subtle" style={{ margin: 0 }}>({(100 * seats / total).toFixed(1)}%)</span>
+            <span className="subtle" style={{ margin: 0 }}>({(100 * seats / (t || 1)).toFixed(1)}%)</span>
           </span>
         );
       })}
@@ -146,7 +146,7 @@ export function SaeimaArc({ scenario }: { scenario: Scenario }) {
     </ChamberCard>
   );
   const W = 920, H = 500, cx = W / 2, cy = H - 44;
-  const seats = layoutArcRows(seatAssign, { cx, cy, r0: 390, rowGap: 27, seatR: 7.5, a0: Math.PI * 0.03, a1: Math.PI * 0.97 });
+  const seats = layoutArcRows(seatAssign, { cx, cy, r0: 390, rowGap: 27, seatR: 7.5, a0: -Math.PI * 0.97, a1: -Math.PI * 0.03 });
   const byId = new Map(scenario.alliances.map((a) => [a.id, a]));
   const entries = order.map((aid) => ({ id: aid, seats: seatsOf(aid) })).filter((e) => e.seats > 0);
   const majority = Math.floor(301 / 2) + 1;
@@ -165,7 +165,8 @@ export function SaeimaArc({ scenario }: { scenario: Scenario }) {
           </radialGradient>
         </defs>
         {/* soft backdrop arc */}
-        <path d={`M ${cx - 402} ${cy} A 402 402 0 0 1 ${cx + 402} ${cy}`} fill="none" stroke="#eef1f6" strokeWidth={30} strokeLinecap="round" />
+        <path d={`M ${cx - 402} ${cy} A 402 402 0 0 1 ${cx + 402} ${cy}`} fill="none" stroke="#eef1f6" strokeWidth={30} strokeLinecap="round" transform={`rotate(180 ${cx} ${cy})`} opacity="0" />
+        <path d={`M ${cx - 402} ${cy} A 402 402 0 0 0 ${cx + 402} ${cy}`} fill="none" stroke="#eef1f6" strokeWidth={30} strokeLinecap="round" />
         {/* majority tick at center-top */}
         <line x1={cx - 6} y1={cy - 404} x2={cx + 6} y2={cy - 404} stroke="#c3c9d8" strokeWidth={2} />
         <text x={cx} y={cy - 412} textAnchor="middle" className="svg-sub">50%</text>
@@ -379,7 +380,7 @@ export function WestminsterDiagram({
                 <span className="sec-dot" style={{ background: SEC_STYLE[sec].color }} />
                 {SEC_STYLE[sec].label} — {groups[sec].length}
               </div>
-              <Legend scenario={scenario} entries={secEntries(sec)} />
+              <Legend scenario={scenario} entries={secEntries(sec)} total={seatList.length} />
             </div>
           )
         ))}
