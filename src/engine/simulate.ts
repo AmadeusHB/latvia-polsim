@@ -2,7 +2,7 @@ import type {
   District, DistrictResult, DistrictTraits, GovernorResult, ModifierLog,
   Party, Scenario, SimulationResult, Weights, Position, EUPosition,
 } from '../types';
-import { TRAIT_KEYS, IDEOLOGY_AFFINITIES } from '../data/presets';
+import { TRAIT_KEYS, IDEOLOGY_AFFINITIES, DISTRICT_IDENTITY } from '../data/presets';
 import type { TraitKey } from '../data/presets';
 import { Rng } from './rng';
 import { meekStv, droopQuota } from './meek';
@@ -224,6 +224,35 @@ export function euAffiliationWeights(scenario: Scenario, allianceId: string): Re
   return agg;
 }
 
+// District identity multiplier (R1): product over the alliance's ideology
+// entries of the district's persistent identity vector, raised to
+// identityStrength. Applies equally to renamed/merged alliances because it
+// keys on ideology strings only (R8/P6).
+export function identityMultiplier(
+  ideology: string, secondaries: string[], districtName: string, w: Weights,
+): number {
+  const vec = DISTRICT_IDENTITY[districtName as keyof typeof DISTRICT_IDENTITY];
+  if (!vec || w.identityStrength === 0) return 1;
+  let m = 1;
+  const entries: [string, number][] = [
+    [ideology, w.dominantIdeologyWeight],
+    ...secondaries.map((sec) => [sec, w.secondaryIdeologyWeight] as [string, number]),
+  ];
+  for (const [ideo, weight] of entries) {
+    const v = vec[ideo];
+    if (typeof v === 'number' && v !== 1) m *= Math.pow(v, weight / w.dominantIdeologyWeight * w.identityStrength);
+  }
+  return clamp(m, 0.25, 3.5);
+}
+
+// National government coattails (R4): governing alliances get a small CoR
+// vote bonus; Supply & Confidence at half effect. Never overrides identity.
+export function coattailMultiplier(status: string | undefined, w: Weights): number {
+  if (status === 'Government') return w.govCoattails;
+  if (status === 'Supply and Confidence') return 1 + (w.govCoattails - 1) * 0.5;
+  return 1;
+}
+
 export function runSimulation(scenario: Scenario, districts: District[]): SimulationResult {
   const w = scenario.weights;
   const seed = scenario.seed;
@@ -258,7 +287,7 @@ export function runSimulation(scenario: Scenario, districts: District[]): Simula
     let total = 0;
     const rawScores: Record<string, number> = {};
     const rawMeta: Record<string, any> = {};
-    interface ScoreMeta { score: number; breakdown: Record<string, number>; ideologyFit: number; positionFit: number; eu: number; inc: number; noise: number; base: number; }
+    interface ScoreMeta { score: number; breakdown: Record<string, number>; ideologyFit: number; positionFit: number; eu: number; inc: number; noise: number; base: number; identity?: number; coattails?: number; regional?: number; }
     const scoreAlliance = (a: AllianceComputed): ScoreMeta => {
       const ideologyFitRaw = affinityScore(a.ideology, a.secondaryIdeologies, d.traits, w);
       // Map affinity score into [ideologyMin, ideologyMax] with 1.0 at neutral.
@@ -298,10 +327,18 @@ export function runSimulation(scenario: Scenario, districts: District[]): Simula
         const totalPop = districts.reduce((sm, x) => sm + x.traits.population, 0) || 1;
         partySum = a.nationalShare * (d.traits.population / totalPop);
       }
+      const identity = identityMultiplier(a.ideology, a.secondaryIdeologies, d.name, w);
+      const coattails = coattailMultiplier(
+        scenario.alliances.find((x) => x.id === a.id)?.saeimaStatus, w);
+      // Regional floor (R2/P1): alliances below the national threshold win
+      // seats effectively only inside their strongholds; elsewhere their vote
+      // is suppressed below the STV quota.
+      const regional = a.seatShare < w.regionalFloorThreshold && !a.homeDistricts.has(d.name)
+        ? w.regionalFloor : 1;
       return {
-        score: partySum * ideologyFit * positionFit * eu * inc * noise,
+        score: partySum * ideologyFit * positionFit * eu * inc * identity * coattails * regional * noise,
         breakdown,
-        ideologyFit, positionFit, eu, inc, noise, base: partySum,
+        ideologyFit, positionFit, eu, inc, identity, coattails, regional, noise, base: partySum,
       };
     };
     for (const a of running) {

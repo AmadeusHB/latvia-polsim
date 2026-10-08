@@ -129,6 +129,10 @@ export interface Weights {
   leanNationalPull: number;
   homePenalty: number;
   positionCurve: number;
+  identityStrength: number;   // district identity-vector multiplier strength (R1)
+  govCoattails: number;       // national government CoR coattail bonus (R4)
+  regionalFloorThreshold: number; // national share below which a party is regional-only (R2)
+  regionalFloor: number;      // multiplier outside strongholds for sub-threshold parties (R2)
 }
 
 export interface DistrictOverride {

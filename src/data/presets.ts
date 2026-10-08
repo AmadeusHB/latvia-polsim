@@ -60,6 +60,7 @@ export const IDEOLOGIES: string[] = [
   'Economic Nationalism',
   'Libertarianism',
   'Right-Wing Libertarianism',
+  'Developmentalism',
   'Neo-Liberalism',
   'Right Statism',
   'Right-Wing Populism',
@@ -67,6 +68,9 @@ export const IDEOLOGIES: string[] = [
   'Ethnic Nationalism',
   'Anti-Environmentalism',
   // --- outside the left-right spectrum ---
+  'Technocracy',
+  'Communitarianism',
+  'Left-Libertarianism',
   'Populism',
   'Pensioners Interests',
   'Lību Interests',
@@ -207,20 +211,58 @@ export const IDEOLOGY_AFFINITIES: Record<string, Partial<Record<TraitKey, number
   'Christian Traditionalism': { religiosity: 9, elderly: 5, education: -3, urbanization: -3 },
   'Latgalian Separatism': { latgalianIdentity: 10, minority: 8, religiosity: 5, agrarian: 5, services: -5, income: -4, urbanization: -5 },
   'Neo-Liberalism': { income: 9, services: 8, urbanization: 6, elderly: -3, heavyIndustry: -3 },
+  // Developmentalism: softer neo-liberalism — the state invests massively,
+  // especially in infrastructure, then leaves the rest to the private market.
+  'Developmentalism': { services: 7, transit: 9, urbanization: 5, income: 6, education: 5, heavyIndustry: 3, euEnthusiasm: 5 },
+  // Technocracy: rule by expertise; pro-EU, educated, urban, evidence-driven.
+  'Technocracy': { education: 9, services: 8, urbanization: 6, euEnthusiasm: 7, elderly: -3 },
+  // Communitarianism: strong communities, social cohesion, local solidarity.
+  'Communitarianism': { religiosity: 4, elderly: 4, agrarian: 5, minority: 3, services: 3 },
+  // Left-Libertarianism: civil liberties + economic justice; urban, young, pro-minority.
+  'Left-Libertarianism': { urbanization: 7, education: 7, minority: 6, services: 5, elderly: -3, income: -3 },
   'EU Federalism': { euEnthusiasm: 10, education: 7, services: 6, urbanization: 5 },
   'Marxism': { heavyIndustry: 7, income: -6, minority: 4, services: -2 },
   'Conservativism': { elderly: 5, religiosity: 5 },
 };
 
+// District identity vectors (R1): persistent multipliers per ideology family.
+// These survive across elections and dominate the district modifier chain so
+// districts keep their character under any national tide (P3/P4).
+export const DISTRICT_IDENTITY: Record<DistrictName, Record<string, number>> = {
+  'Riga': { 'Urbanism/YIMBYism': 2.0, 'Economic Progressivism': 1.8, 'Green Politics': 1.6, 'Anti-Corruption': 1.5, 'Minority Interests': 1.4, 'Agrarianism': 0.4, 'Ethnic Nationalism': 0.3 },
+  'Pierīga': { 'Liberal Conservatism': 1.5, 'Developmentalism': 1.4, 'Classical Liberalism': 1.4, 'Regionalism': 1.4, 'Centrism': 1.2 },
+  'Vidzeme': { 'National Conservatism': 2.0, 'Conservative Agrarianism': 1.7, 'Christian Democracy': 1.6, 'Urbanism/YIMBYism': 0.5, 'Left-Wing Populism': 0.5 },
+  'Zemgale': { 'National Conservatism': 1.5, 'Conservative Agrarianism': 1.5, 'Christian Democracy': 1.3, 'Urbanism/YIMBYism': 0.6 },
+  'Greater Jelgava': { 'National Conservatism': 1.4, 'Conservative Agrarianism': 1.3, 'Urbanism/YIMBYism': 0.6 },
+  'Latgale': { 'Latgalian Regionalism': 2.2, 'Minority Interests': 1.8, 'Russian Interests': 1.7, 'Lību Interests': 1.6, 'Labourism': 1.3, 'Socialism': 1.3, 'Ethnic Nationalism': 0.3 },
+  'Greater Daugavpils': { 'Latgalian Regionalism': 2.0, 'Minority Interests': 1.8, 'Russian Interests': 1.7, 'Lību Interests': 1.6, 'Labourism': 1.5, 'Socialism': 1.4, 'Ethnic Nationalism': 0.3 },
+  'Kurzeme': { 'Liberal Conservatism': 1.5, 'Developmentalism': 1.4, 'Classical Liberalism': 1.4, 'Regionalism': 1.3 },
+  'Greater Liepāja': { 'Labourism': 1.5, 'Socialism': 1.4, 'Social Democracy': 1.4, 'Economic Progressivism': 1.3 },
+  'Daugavpils': { 'Latgalian Regionalism': 2.2, 'Minority Interests': 2.0, 'Russian Interests': 1.8, 'Labourism': 1.6, 'Socialism': 1.5, 'Ethnic Nationalism': 0.3 },
+  'Liepāja': { 'Labourism': 1.8, 'Socialism': 1.6, 'Social Democracy': 1.5, 'Economic Progressivism': 1.4 },
+  'Jelgava': { 'Labourism': 1.5, 'Socialism': 1.4, 'Social Democracy': 1.4, 'Economic Progressivism': 1.3 },
+  'Jūrmala': { 'Labourism': 1.3, 'Social Democracy': 1.3, 'Liberal Conservatism': 1.2 },
+  'Ventspils': { 'Labourism': 1.4, 'Social Democracy': 1.3 },
+  'Rēzekne': { 'Latgalian Regionalism': 2.4, 'Minority Interests': 2.0, 'Russian Interests': 1.7, 'Lību Interests': 1.6, 'Ethnic Nationalism': 0.3 },
+  'Valmiera': { 'Centrism': 1.5, 'Localism': 1.4, 'Third Way': 1.4 },
+  'Jēkabpils': { 'National Conservatism': 1.6, 'Conservative Agrarianism': 1.4, 'Urbanism/YIMBYism': 0.5 },
+  'Cēsis': { 'National Conservatism': 1.6, 'Conservative Agrarianism': 1.4, 'Christian Democracy': 1.3 },
+  'Living Outside Latvia': { 'Centrism': 1.4, 'EU Federalism': 1.4, 'Social Liberalism': 1.3, 'Hard Anti-EU stance': 0.3 },
+};
+
 export const DEFAULT_WEIGHTS: Weights = {
+  identityStrength: 1.0,
+  govCoattails: 1.10,
+  regionalFloorThreshold: 0.04,
+  regionalFloor: 0.35,
   ideologyMin: 0.5,
-  ideologyMax: 1.7,
+  ideologyMax: 2.2,
   positionMin: 0.55,
   positionMax: 1.3,
   euMin: 0.85,
   euMax: 1.15,
-  homeBonus: 4.5,
-  incumbentBonus: 1.05,
+  homeBonus: 4.0,
+  incumbentBonus: 1.30,
   noiseSigma: 0.03,
   crossEndorsementProb: 0.70,
   dominantIdeologyWeight: 2.0,
@@ -235,8 +277,8 @@ export const DEFAULT_WEIGHTS: Weights = {
   ballotsPerDistrict: 100000,
   govRunoffNoise: 0.03,
   leanNationalPull: 0.5,
+  positionCurve: 3.8,
   homePenalty: 1.0,
-  positionCurve: 2.2,
 };
 
 export const SEAT_TOTAL_CHECK = DISTRICT_ORDER.reduce((s, d) => s + DISTRICT_SEATS[d], 0);

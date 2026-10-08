@@ -82,7 +82,10 @@ describe('Calibration: 20th Saeima (right won)', () => {
       const byA: Record<string, number> = {};
       for (const e of dr.elected) byA[e.allianceId] = (byA[e.allianceId] ?? 0) + 1;
       const maxSeats = Math.max(...Object.values(byA));
-      expect(maxSeats).toBeLessThanOrEqual(Math.ceil(d.corSeats * 0.55));
+      // Measured ceiling from the six-election dataset (P2/P1): district
+      // winners reach up to ~71% of a small district's seats (PopR 5/7 in
+      // Kurzeme and Jūrmala, 20th Saeima ground truth), so the cap is 75%.
+      expect(maxSeats).toBeLessThanOrEqual(Math.ceil(d.corSeats * 0.75));
     }
   });
 

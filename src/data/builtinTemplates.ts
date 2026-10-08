@@ -1,4 +1,5 @@
 import type { Scenario, Party, Alliance, RegionalAlliance, DistrictName, Position, EUPosition, SaeimaStatus } from '../types';
+import { ELECTIONS, buildHistoricalScenario } from './historicalElections';
 import { DEFAULT_WEIGHTS, DISTRICT_ORDER } from './presets';
 
 // Built-in scenario templates shipped with the app. The 25th Saeima
@@ -134,4 +135,5 @@ function buildTemplate(def: { alliances: AllianceT[]; blocs: BlocT[]; seed: numb
 
 export const BUILTIN_TEMPLATES: { label: string; build: () => Scenario }[] = [
   { label: '25th Saeima — The Left Won', build: () => buildTemplate(LEFT_25TH) },
+  ...ELECTIONS.map((e) => ({ label: e.label, build: () => buildHistoricalScenario(e) })),
 ];
