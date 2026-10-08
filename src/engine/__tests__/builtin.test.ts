@@ -31,7 +31,7 @@ it('built-in template: 25th Saeima loads and simulates correctly', () => {
 
 it('ideology catalog: spectrum-ordered, complete, no dupes', async () => {
   const { IDEOLOGIES: items } = await import('../../data/presets');
-  expect(items.length).toBe(61);
+  expect(items.length).toBe(65);  // 61 + Developmentalism, Technocracy, Communitarianism, Left-Libertarianism
   expect(new Set(items).size).toBe(items.length);
   // far-left first, far-right last of the spectrum section
   expect(items[0]).toBe('Marxism');

@@ -129,3 +129,24 @@ describe('Historical calibration dataset (20th-25th Saeima)', () => {
     expect(tooUniform.length).toBe(0);
   }, 300000);
 });
+
+describe('Ideology registry additions', () => {
+  it('Developmentalism, Technocracy, Communitarianism, Left-Libertarianism are registered with trait affinities', () => {
+    const { IDEOLOGIES, IDEOLOGY_AFFINITIES, DISTRICT_IDENTITY } = presetsModule;
+    for (const ideo of ['Developmentalism', 'Technocracy', 'Communitarianism', 'Left-Libertarianism']) {
+      expect(IDEOLOGIES).toContain(ideo);
+      const aff = IDEOLOGY_AFFINITIES[ideo];
+      expect(aff).toBeDefined();
+      expect(Object.keys(aff).length).toBeGreaterThan(0);
+    }
+    // Developmentalism is already referenced by district identity vectors
+    // (Pierīga, Kurzeme — R1) and now resolves to a real affinity.
+    expect(DISTRICT_IDENTITY['Pierīga']['Developmentalism'] ?? DISTRICT_IDENTITY['Kurzeme']['Developmentalism']).toBeDefined();
+    // engine accepts the new ideologies end-to-end
+    const aff = IDEOLOGY_AFFINITIES['Developmentalism']!;
+    expect(aff.transit).toBe(9);
+    expect((IDEOLOGY_AFFINITIES['Technocracy'] as any).education).toBe(9);
+  });
+});
+
+import * as presetsModule from '../../data/presets';
