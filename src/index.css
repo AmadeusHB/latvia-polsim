@@ -178,3 +178,11 @@ label input[type="number"], label input:not([type]), label select { font-weight:
 @media (prefers-reduced-motion: reduce) {
   .diagram circle, .legend-item { transition: none !important; }
 }
+
+/* LAW 8 legend spec: two columns, aligned counts, 14px chips */
+.legend-two-col { display: flex; gap: 16px; padding-top: 6px; }
+.legend-two-col .legend-col { flex: 1; min-width: 0; }
+.legend-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; min-height: 18px; }
+.legend-chip { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+.legend-name { font-size: 13px; color: #16192b; white-space: nowrap; overflow: visible; }
+.legend-count { font-size: 12px; color: #64748b; margin-left: auto; min-width: 3em; text-align: right; }
