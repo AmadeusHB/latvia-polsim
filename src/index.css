@@ -169,3 +169,12 @@ label input[type="number"], label input:not([type]), label select { font-weight:
 /* scenarios list polish */
 .entity-list button { font-weight: 600; }
 .section-divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+
+/* diagram header right total */
+.diagram-total { font-size: 15px; font-weight: 800; color: var(--text); letter-spacing: -0.01em; align-self: center; white-space: nowrap; }
+.diagram-head > div:first-child { display: flex; flex-direction: column; gap: 2px; }
+.legend-item { cursor: default; transition: opacity 120ms linear; }
+.parliament-legend { align-items: center; }
+@media (prefers-reduced-motion: reduce) {
+  .diagram circle, .legend-item { transition: none !important; }
+}

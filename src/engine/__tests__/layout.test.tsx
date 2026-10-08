@@ -1,92 +1,112 @@
 import { it, expect } from 'vitest';
 import { renderToString } from 'react-dom/server';
-import { SaeimaArc, WestminsterDiagram, horseshoe } from '../../components/Diagrams';
+import { valleyPositions, assertContiguous } from '../../components/parliament';
+
+const avg = (arr: number[]) => arr.reduce((s, x) => s + x, 0) / (arr.length || 1);
+import { SaeimaArc, WestminsterDiagram } from '../../components/Diagrams';
 import { runSimulation } from '../simulate';
 import { defaultDistricts } from '../../data/presets';
 import { buildScenario, RIGHT, RIGHT_BLOCS } from './reference.test';
 
-// --- Contiguity invariant: seats are laid out strictly in angular order
-// --- (non-decreasing t). Because the seat list is ordered by party, every
-// --- party's seats therefore occupy ONE contiguous angular wedge — no
-// --- alliance can ever split into two clusters or dangle.
-function checkAngularMonotonic(positions: { t: number }[]): boolean {
-  for (let i = 1; i < positions.length; i++) {
-    if (positions[i].t < positions[i - 1].t - 1e-9) return false;
-  }
-  return true;
-}
-
-it('horseshoe geometry: dense rows, capacity ∝ radius, exact total', () => {
-  const { positions, r_i, r_o, rows } = horseshoe(301, 7.5, 9);
-  expect(positions.length).toBe(301);
-  expect(rows).toBeGreaterThanOrEqual(7);        // multiple dense concentric rows
+it('valley geometry: opens UP (band below center), capacities ∝ radius, exact total', () => {
+  const { slots, r_i, r_o, rows } = valleyPositions(301, 7.5, 9);
+  expect(slots.length).toBe(301);
+  expect(rows).toBeGreaterThanOrEqual(7);
   expect(rows).toBeLessThanOrEqual(14);
-  expect(r_o / r_i).toBeGreaterThan(1.6);        // outer rows longer than inner
-  expect(r_o / r_i).toBeLessThan(3.0);           // wide shallow valley, not a cone
-  // density: outer/inner capacity ratio ≈ outer/inner radius ratio
-  const inner = positions.filter((p) => p.r === r_i).length;
-  const outer = positions.filter((p) => p.r === r_o).length;
+  // valley: all seats BELOW the arc center (y > 0), arms at the top (y≈0), bottom deep (y≈r_o)
+  const ys = slots.map((p) => p.y);
+  expect(Math.min(...ys)).toBeGreaterThan(-2);        // arms at the top edge
+  expect(Math.max(...ys)).toBeCloseTo(r_o, -1);        // band bottom
+  expect(Math.max(...ys)).toBeGreaterThan(r_o * 0.9);
+  // symmetric around x=0
+  expect(Math.abs(Math.max(...slots.map((p) => p.x)) + Math.min(...slots.map((p) => p.x)))).toBeLessThan(2 * 17.4);
+  // capacity ∝ radius: outer row has ~r_o/r_i× inner row's seats
+  const inner = slots.filter((p) => p.r === r_i).length;
+  const outer = slots.filter((p) => p.r === r_o).length;
   expect(outer / inner).toBeCloseTo(r_o / r_i, 0);
-  // band thickness (radial) vs arc width: wide & shallow
-  expect((r_o - r_i) / (2 * r_o)).toBeLessThan(0.35);
-  // even spacing within rows: no crammed or sparse rows (uniform density)
-  const rowCounts = new Map<number, number>();
-  for (const p of positions) rowCounts.set(p.r, (rowCounts.get(p.r) ?? 0) + 1);
-  for (const [r, c] of rowCounts) {
-    const expected = (r * Math.PI) / (2 * 7.5 + 2.2);
-    expect(c / expected).toBeGreaterThan(0.7);
-    expect(c / expected).toBeLessThan(1.3);
+  // reading order: boustrophedon rows — consecutive slots are always
+  // geometrically adjacent (within 1.5 seat diameters), which guarantees
+  // any consecutive run forms ONE connected block (contiguity invariant).
+  const D = 2 * 7.5;
+  for (let i = 1; i < slots.length; i++) {
+    const d = Math.hypot(slots[i].x - slots[i - 1].x, slots[i].y - slots[i - 1].y);
+    expect(d).toBeLessThanOrEqual(1.5 * D + 0.6);
   }
 });
 
-it('Saeima: every alliance is one contiguous wedge (no split blocks)', () => {
+it('Saeima: valley orientation + one contiguous wedge per alliance', () => {
   const sc = buildScenario(RIGHT, RIGHT_BLOCS, 20);
   const html = renderToString(<SaeimaArc scenario={sc} />);
-  // extract circle positions in DOM order (order == angular order)
-  const circles = [...html.matchAll(/<circle cx="([\d.-]+)" cy="([\d.-]+)" r="7\.5"/g)]
-    .map((m) => ({ cx: +m[1], cy: +m[2] }));
+  const vb = html.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/)!;
+  const W = +vb[1];
+  const circles = [...html.matchAll(/<circle cx="([\d.-]+)" cy="([\d.-]+)" r="7\.5"/g)].map((m) => ({ cx: +m[1], cy: +m[2] }));
   expect(circles.length).toBe(301);
+  // VALLEY: the LOWEST seats (max cy) are at bottom-CENTER; the HIGHEST seats (min cy) at the ENDS
+  const cxMid = W / 2;
+  const bottomSeats = circles.filter((c) => c.cy > Math.max(...circles.map((k) => k.cy)) - 10);
+  const topSeats = circles.filter((c) => c.cy < Math.min(...circles.map((k) => k.cy)) + 10);
+  const avg = (arr: number[]) => arr.reduce((s, x) => s + x, 0) / (arr.length || 1);
+  // bottom-center seats cluster around the middle x
+  expect(Math.abs(avg(bottomSeats.map((c) => c.cx)) - cxMid)).toBeLessThan(W * 0.12);
+  // top (arm-end) seats sit far left AND far right
+  const topXs = topSeats.map((c) => c.cx);
+  expect(Math.min(...topXs)).toBeLessThan(W * 0.25);
+  expect(Math.max(...topXs)).toBeGreaterThan(W * 0.75);
+  // contiguity: one DOM run per alliance
   const titles = [...html.matchAll(/<circle[^>]*><title>([^<]*)<\/title>/g)].map((m) => m[1]);
-  expect(titles.length).toBe(301);
-  // THE contiguity invariant: seats assigned in non-decreasing angular order
-  const w = html.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/)!;
-  const cx = +w[1] / 2;
-  const cy0 = 116; // Saeima circle center
-  // angle decreases as t increases (sweep PI→0), so negate for ascending order
-  const angularOk = checkAngularMonotonic(circles.map((c) => ({ t: -Math.atan2(c.cy - cy0, c.cx - cx) })));
-  expect(angularOk).toBe(true);
-  // contiguous in DOM order: same alliance appears in exactly one run
   const seq = titles.map((t) => t.split(' — ')[0]);
   const runs: string[] = [];
   for (const s of seq) if (runs[runs.length - 1] !== s) runs.push(s);
-  const unique = new Set(seq);
-  expect(runs.length).toBe(unique.size);
+  expect(runs.length).toBe(new Set(seq).size);
 });
 
-it('CoR: sections and alliances are contiguous; 150 seats; wide shallow shape', () => {
+it('CoR Westminster: facing banks, floor gap, sections contiguous', () => {
   const sc = buildScenario(RIGHT, RIGHT_BLOCS, 20);
   const res = runSimulation(sc, defaultDistricts());
   const html = renderToString(<WestminsterDiagram scenario={sc} results={res} mode="cor" />);
-  const circles = [...html.matchAll(/<circle cx="([\d.-]+)" cy="([\d.-]+)" r="9"/g)]
-    .map((m) => ({ cx: +m[1], cy: +m[2] }));
-  expect(circles.length).toBe(150);
-  // alliance runs in DOM order == unique alliances (contiguous blocks)
-  const titles = [...html.matchAll(/<circle[^>]*><title>([^<]*)<\/title>/g)].map((m) => m[1]);
-  const seq = titles.map((t) => t.replace(/ \(.*\)/, ''));
-  const runs: string[] = [];
-  for (const s of seq) if (runs[runs.length - 1] !== s) runs.push(s);
-  expect(runs.length).toBe(new Set(seq).size);
-  // viewBox: wide & shallow (width > height)
   const vb = html.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/)!;
-  expect(+vb[1]).toBeGreaterThan(+vb[2]);
+  const W = +vb[1];
+  const circles = [...html.matchAll(/<circle cx="([\d.-]+)" cy="([\d.-]+)" r="9"/g)].map((m) => ({ cx: +m[1], cy: +m[2] }));
+  expect(circles.length).toBe(150);
+  // government seats on the LEFT half, opposition on the RIGHT half (by alliance status)
+  const titles = [...html.matchAll(/<circle[^>]*><title>([^<]*)<\/title>/g)].map((m) => m[1]);
+  const govNames = new Set(sc.alliances.filter((a) => a.saeimaStatus === 'Government').map((a) => a.name));
+  const oppNames = new Set(sc.alliances.filter((a) => a.saeimaStatus === 'Opposition').map((a) => a.name));
+  const govXs: number[] = [], oppXs: number[] = [];
+  circles.forEach((_, i) => {
+    const name = titles[i].replace(/ \(.*\)/, '');
+    if (govNames.has(name)) govXs.push(circles[i].cx);
+    if (oppNames.has(name)) oppXs.push(circles[i].cx);
+  });
+  expect(govXs.length).toBeGreaterThan(0);
+  expect(oppXs.length).toBeGreaterThan(0);
+  // government bank is left of opposition bank (mean comparison)
+  expect(avg(govXs)).toBeLessThan(avg(oppXs));
+  // clear floor gap: between the banks, BELOW the cross-bench zone (which
+  // legitimately occupies the center above the floor), no seat may appear.
+  const titlesAll = [...html.matchAll(/<circle[^>]*><title>([^<]*)<\/title>/g)].map((m) => m[1]);
+  const crossNames = new Set(sc.alliances.filter((a) => a.saeimaStatus === 'Cross-bench').map((a) => a.name));
+  const nonCrossIdx = circles.map((_, i) => i).filter((i) => !crossNames.has(titlesAll[i].replace(/ \(.*\)/, '')));
+  const crossBottom = Math.max(...circles.filter((_, i) => crossNames.has(titlesAll[i].replace(/ \(.*\)/, ''))).map((c) => c.cy), 0);
+  const floorHalf = W * 0.09;
+  const inFloor = nonCrossIdx.map((i) => circles[i])
+    .filter((c) => Math.abs(c.cx - W / 2) < floorHalf && c.cy > crossBottom - 2);
+  expect(inFloor.length).toBe(0);
+  // contiguity per alliance via adjacency graph (the runtime self-check also runs)
+  const owner = titles.map((t) => t.replace(/ \(.*\)/, ''));
+  assertContiguous('CoR-test', circles.map((c) => ({ x: c.cx, y: c.cy })), owner, 9);
+  // labels present
+  expect(html).toContain('GOVERNMENT');
+  expect(html).toContain('OPPOSITION');
 });
 
-it('CoG: 18 seats, contiguous blocks, wide shape', () => {
+it('CoG Westminster: 18 seats, 2x badge, same layout', () => {
   const sc = buildScenario(RIGHT, RIGHT_BLOCS, 20);
   const res = runSimulation(sc, defaultDistricts());
   const html = renderToString(<WestminsterDiagram scenario={sc} results={res} mode="cog" />);
   const circles = [...html.matchAll(/<circle cx="([\d.-]+)" cy="([\d.-]+)" r="19"/g)];
   expect(circles.length).toBe(18);
-  const vb = html.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/)!;
-  expect(+vb[1]).toBeGreaterThan(+vb[2]);
+  expect((html.match(/2×/g) ?? []).length).toBeGreaterThanOrEqual(18);
+  expect(html).toContain('GOVERNMENT');
+  expect(html).toContain('OPPOSITION');
 });

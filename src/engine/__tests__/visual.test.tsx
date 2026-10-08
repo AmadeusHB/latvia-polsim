@@ -10,11 +10,12 @@ it('diagram cards render polished structure', () => {
   const res = runSimulation(sc, defaultDistricts());
   const html = renderToString(<div><SaeimaArc scenario={sc} /><WestminsterDiagram scenario={sc} results={res} mode="cor" /><WestminsterDiagram scenario={sc} results={res} mode="cog" /></div>);
   expect(html).toContain('diagram-card');
+  expect(html).toContain('diagram-total');
   expect(html).toContain('diagram-title');
   expect(html).toContain('Saeima');
   expect(html).toContain('Council of Regions');
   expect(html).toContain('Council of Governors');
   expect(html).toContain('legend-cols');
-  expect(html).toContain('Government');
+  expect(html).toContain('GOVERNMENT');
 
 });
