@@ -117,14 +117,31 @@ function PartiesTab() {
   const [form, setForm] = useState<Partial<Party>>({
     name: '', ideology: IDEOLOGIES[0], secondaryIdeologies: [], positions: ['Center'],
     dominantPosition: 'Center', euPosition: 'Pro-EU', euroGroup: 'NI', saeimaSeats: 0,
-    homeDistricts: [], allianceId: '', color: '#8899aa',
+    homeDistricts: [], runningDistricts: [], allianceId: '', color: '#8899aa',
   });
+  const [editId, setEditId] = useState<string | null>(null);
   const set = (patch: Partial<Party>) => setForm((f) => ({ ...f, ...patch }));
   const toggleIn = <T,>(arr: T[], v: T): T[] => arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v];
   const valid = form.name && form.allianceId && scenario.alliances.some((a) => a.id === form.allianceId);
+  const startEdit = (p: Party) => {
+    setEditId(p.id);
+    setForm({ ...p });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+  const submit = () => {
+    if (editId) {
+      store.updateParty(editId, form as any);
+      setEditId(null);
+    } else {
+      store.addParty(form as any);
+    }
+    setForm({ name: '', ideology: IDEOLOGIES[0], secondaryIdeologies: [], positions: ['Center'],
+      dominantPosition: 'Center', euPosition: 'Pro-EU', euroGroup: 'NI', saeimaSeats: 0,
+      homeDistricts: [], runningDistricts: [], allianceId: form.allianceId, color: '#8899aa' });
+  };
   return (
     <div className="panel">
-      <h3>Add Party</h3>
+      <h3>{editId ? '✏️ Edit Party' : '➕ Add Party'}</h3>
       <div className="form-grid">
         <label>Name <input value={form.name} onChange={(e) => set({ name: e.target.value })} /></label>
         <label>Dominant ideology <select value={form.ideology} onChange={(e) => set({ ideology: e.target.value })}>
@@ -133,20 +150,25 @@ function PartiesTab() {
         <label>Secondary ideologies (max 3)
           <div className="chips">
             {IDEOLOGIES.filter((i) => i !== form.ideology).map((i) => (
-              <button key={i} className={form.secondaryIdeologies?.includes(i) ? 'chip on' : 'chip'}
+              <button type="button" key={i} className={form.secondaryIdeologies?.includes(i) ? 'chip on' : 'chip'}
                 onClick={() => set({ secondaryIdeologies: toggleIn(form.secondaryIdeologies!, i).slice(0, 3) })}>{i}</button>
             ))}
           </div>
         </label>
-        <label>Positions <div className="chips">
-          {POSITIONS.map((p) => (
-            <button key={p} className={form.positions?.includes(p) ? 'chip on' : 'chip'}
-              onClick={() => {
-                const pos = toggleIn(form.positions!, p as Position);
-                set({ positions: pos, dominantPosition: (pos.includes(form.dominantPosition as Position) ? form.dominantPosition : pos[0]) as Position });
-              }}>{p}</button>
-          ))}
-        </div></label>
+        <label>Positions (pick 1–2, one dominant)
+          <div className="chips">
+            {POSITIONS.map((p) => (
+              <button type="button" key={p} className={form.positions?.includes(p) ? 'chip on' : 'chip'}
+                onClick={() => {
+                  const pos = toggleIn(form.positions!, p as Position);
+                  set({
+                    positions: pos,
+                    dominantPosition: (pos.includes(form.dominantPosition as Position) ? form.dominantPosition : pos[pos.length - 1]) as Position,
+                  });
+                }}>{p}</button>
+            ))}
+          </div>
+        </label>
         <label>Dominant position <select value={form.dominantPosition} onChange={(e) => set({ dominantPosition: e.target.value as Position })}>
           {(form.positions ?? []).map((p) => <option key={p}>{p}</option>)}
         </select></label>
@@ -163,36 +185,52 @@ function PartiesTab() {
           {scenario.alliances.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select></label>
         <label>Color <input type="color" value={form.color} onChange={(e) => set({ color: e.target.value })} /></label>
-        <label>Home districts <div className="chips">
-          {DISTRICT_ORDER.map((d) => (
-            <button key={d} className={form.homeDistricts?.includes(d) ? 'chip on' : 'chip'}
-              onClick={() => set({ homeDistricts: toggleIn(form.homeDistricts!, d as DistrictName) })}>{d}</button>
-          ))}
-        </div></label>
+        <label>🏠 Home districts (bonus here, small penalty elsewhere; none = runs evenly everywhere)
+          <div className="chips">
+            {DISTRICT_ORDER.map((d) => (
+              <button type="button" key={d} className={form.homeDistricts?.includes(d) ? 'chip on' : 'chip'}
+                onClick={() => set({ homeDistricts: toggleIn(form.homeDistricts!, d as DistrictName) })}>{d}</button>
+            ))}
+          </div>
+        </label>
+        <label>🏃 Running districts (empty = runs wherever its alliance runs)
+          <div className="chips">
+            <button type="button" className={form.runningDistricts?.length ? 'chip' : 'chip on'}
+              onClick={() => set({ runningDistricts: [] })}>Everywhere (follow alliance)</button>
+            {DISTRICT_ORDER.map((d) => (
+              <button type="button" key={d} className={form.runningDistricts?.includes(d) ? 'chip on' : 'chip'}
+                onClick={() => set({ runningDistricts: toggleIn(form.runningDistricts!, d as DistrictName) })}>{d}</button>
+            ))}
+          </div>
+        </label>
       </div>
-      <button disabled={!valid} onClick={() => {
-        store.addParty(form as any);
-        set({ name: '' });
-      }}>Add Party</button>
+      <div className="row">
+        <button className="primary" disabled={!valid} onClick={submit}>{editId ? 'Save Changes' : 'Add Party'}</button>
+        {editId && <button onClick={() => { setEditId(null); setForm({ name: '' }); }}>Cancel</button>}
+      </div>
       {!valid && <span className="hint">Name and a parent alliance are required. Create an alliance first if none exist.</span>}
 
       <h3>Parties ({scenario.parties.length})</h3>
       <table className="table">
-        <thead><tr><th>Name</th><th>Ideology</th><th>Position</th><th>EU</th><th>Euro</th><th>Saeima</th><th>Alliance</th><th>Color</th><th></th></tr></thead>
+        <thead><tr><th></th><th>Name</th><th>Ideology</th><th>Position</th><th>EU</th><th>Euro</th><th>Saeima</th><th>Home</th><th>Alliance</th><th></th></tr></thead>
         <tbody>
           {scenario.parties.map((p) => (
-            <tr key={p.id}>
+            <tr key={p.id} className={editId === p.id ? 'overridden-row' : ''}>
+              <td><span className="color-dot" style={{ background: p.color }} /></td>
               <td>{p.name}</td>
               <td>{p.ideology}{p.secondaryIdeologies.length ? ` + ${p.secondaryIdeologies.join(', ')}` : ''}</td>
-              <td>{p.positions.join(' / ')} <em>({p.dominantPosition} dominant)</em></td>
+              <td>{p.positions.join(' / ')} <em>({p.dominantPosition})</em></td>
               <td>{p.euPosition}</td>
               <td>{p.euroGroup}</td>
               <td><input type="number" value={p.saeimaSeats} onChange={(e) => store.updateParty(p.id, { saeimaSeats: +e.target.value })} /></td>
+              <td className="small-text">{p.homeDistricts.length ? p.homeDistricts.length + ' dist.' : '—'}</td>
               <td><select value={p.allianceId} onChange={(e) => store.updateParty(p.id, { allianceId: e.target.value })}>
                 {scenario.alliances.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select></td>
-              <td><input type="color" value={p.color} onChange={(e) => store.updateParty(p.id, { color: e.target.value })} /></td>
-              <td><button className="danger" onClick={() => store.removeParty(p.id)}>✕</button></td>
+              <td className="row-actions">
+                <button onClick={() => startEdit(p)}>✏️</button>
+                <button className="danger" onClick={() => store.removeParty(p.id)}>✕</button>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -200,7 +238,6 @@ function PartiesTab() {
     </div>
   );
 }
-
 // ---------- Alliances ----------
 function AlliancesTab() {
   const store = useStore();
@@ -288,24 +325,56 @@ function AlliancesTab() {
                 <span>Euro affiliations: {Object.entries(euAff).map(([g, w]) => `${g} ${w.toFixed(2)}`).join(', ') || '—'}</span>
                 <span>Implied national vote share: <strong>{(c.nationalShare * 100).toFixed(2)}%</strong></span>
               </>}
-              <div className="row">
+              <div className="manual-block">
                 <label className="inline">
                   <input type="checkbox" checked={!a.autoIdeology} onChange={(e) => store.updateAlliance(a.id, { autoIdeology: !e.target.checked })} /> Manual ideology
                 </label>
-                {!a.autoIdeology && <>
-                  <select value={a.overrideIdeology} onChange={(e) => store.updateAlliance(a.id, { overrideIdeology: e.target.value })}>
-                    {IDEOLOGIES.map((i) => <option key={i}>{i}</option>)}
-                  </select>
-                  <select value={a.overrideDominantPosition} onChange={(e) => store.updateAlliance(a.id, { overrideDominantPosition: e.target.value as Position })}>
-                    {POSITIONS.map((p) => <option key={p}>{p}</option>)}
-                  </select>
-                  <select value={a.overrideEuPosition} onChange={(e) => store.updateAlliance(a.id, { overrideEuPosition: e.target.value as EUPosition })}>
-                    {EU_POSITIONS.map((p) => <option key={p}>{p}</option>)}
-                  </select>
-                </>}
+                {!a.autoIdeology && (
+                  <div className="chips">
+                    {IDEOLOGIES.map((i) => (
+                      <button type="button" key={i}
+                        className={(a.overrideIdeology === i || (a.overrideSecondaryIdeologies ?? []).includes(i)) ? 'chip on' : 'chip'}
+                        onClick={() => {
+                          const sec = a.overrideSecondaryIdeologies ?? [];
+                          if (a.overrideIdeology === i) {
+                            store.updateAlliance(a.id, { overrideIdeology: undefined });
+                          } else if (sec.includes(i)) {
+                            store.updateAlliance(a.id, { overrideSecondaryIdeologies: sec.filter((x) => x !== i) });
+                          } else if (!a.overrideIdeology) {
+                            store.updateAlliance(a.id, { overrideIdeology: i });
+                          } else {
+                            store.updateAlliance(a.id, { overrideSecondaryIdeologies: [...sec, i].slice(0, 3) });
+                          }
+                        }}>{i}{a.overrideIdeology === i ? ' ★' : ''}</button>
+                    ))}
+                  </div>
+                )}
                 <label className="inline">
-                  <input type="checkbox" checked={!a.autoPosition} onChange={(e) => store.updateAlliance(a.id, { autoPosition: !e.target.checked, autoEuPosition: !e.target.checked })} /> Manual position/EU
+                  <input type="checkbox" checked={!a.autoPosition} onChange={(e) => store.updateAlliance(a.id, { autoPosition: !e.target.checked, autoEuPosition: !e.target.checked })} /> Manual position &amp; EU
                 </label>
+                {!a.autoPosition && (
+                  <div className="chips">
+                    {POSITIONS.map((p) => (
+                      <button type="button" key={p}
+                        className={(a.overridePositions ?? []).includes(p) ? 'chip on' : 'chip'}
+                        onClick={() => {
+                          const pos = (a.overridePositions ?? []).includes(p)
+                            ? (a.overridePositions ?? []).filter((x) => x !== p)
+                            : [...(a.overridePositions ?? []), p];
+                          const dom = (a.overrideDominantPosition && pos.includes(a.overrideDominantPosition as Position))
+                            ? a.overrideDominantPosition
+                            : pos[pos.length - 1] ?? 'Center';
+                          store.updateAlliance(a.id, { overridePositions: pos as Position[], overrideDominantPosition: dom as Position });
+                        }}>{p}{a.overrideDominantPosition === p ? ' ★' : ''}</button>
+                    ))}
+                    <select value={a.overrideDominantPosition} onChange={(e) => store.updateAlliance(a.id, { overrideDominantPosition: e.target.value as Position })}>
+                      {(a.overridePositions ?? []).map((p) => <option key={p}>{p}</option>)}
+                    </select>
+                    <select value={a.overrideEuPosition} onChange={(e) => store.updateAlliance(a.id, { overrideEuPosition: e.target.value as EUPosition })}>
+                      {EU_POSITIONS.map((p) => <option key={p}>{p}</option>)}
+                    </select>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -514,7 +583,6 @@ function ResultsTab() {
   const scenario = store.active()!;
   const res = scenario.results;
   const [bts, setBts] = useState(false);
-  const [hover, setHover] = useState<string | null>(null);
   const districts = defaultDistricts();
   const allianceById = new Map(scenario.alliances.map((a) => [a.id, a.name]));
   const colorById = new Map(scenario.alliances.map((a) => [a.id, a.color]));
@@ -560,10 +628,8 @@ function ResultsTab() {
         <label className="inline"><input type="checkbox" checked={bts} onChange={(e) => setBts(e.target.checked)} /> Behind-the-scenes view</label>
         <span className="meta">Seed: {res.seed} · Councilors: {totalSeats}/150 · Governors: {totalGovs}/18 · Joint-session votes: {totalWeight}</span>
       </div>
-      {hover && <div className="hovercard"><strong>{allianceById.get(hover)}</strong></div>}
-
       <h3>Saeima — 301 seats</h3>
-      <SaeimaArc scenario={scenario} onHover={setHover} />
+      <SaeimaArc scenario={scenario} />
 
       <h3>Council of Regions — 150 seats (outline = bloc color)</h3>
       <WestminsterDiagram scenario={scenario} results={res} mode="cor" />
@@ -573,28 +639,60 @@ function ResultsTab() {
 
       <h3>District Results</h3>
       <table className="table">
-        <thead><tr><th>District</th><th>Governor</th><th>Stage 1 / Runoff</th><th>Councilors per alliance</th></tr></thead>
+        <thead><tr>
+          <th>District</th><th>Governor</th><th>Governor stage</th>
+          <th>Vote share (top alliances)</th><th>Councilors won</th>
+        </tr></thead>
         <tbody>
           {districts.map((d) => {
             const dr = res.districtResults[d.name as DistrictName];
             const g = dr.governor;
             const seatsBy: Record<string, number> = {};
             for (const e of dr.elected) seatsBy[e.allianceId] = (seatsBy[e.allianceId] ?? 0) + 1;
+            const topShares = Object.entries(dr.shares)
+              .sort((a: any, b: any) => b[1].finalShare - a[1].finalShare).slice(0, 7);
+            const winnerSeats = Object.entries(seatsBy).sort((a: any, b: any) => b[1] - a[1])[0];
             return (
               <tr key={d.name} className={dr.overridden ? 'overridden-row' : ''}>
-                <td><strong>{d.name}</strong>{dr.overridden && <span className="badge">override</span>}</td>
+                <td><strong>{d.name}</strong>
+                  <div className="subtle">{d.corSeats} seats{d.electsGovernor ? '' : ' · no governor'}</div>
+                  {dr.overridden && <span className="badge">override</span>}</td>
                 <td>{!g ? <em>—</em> : <>
                   <span className="color-dot" style={{ background: colorById.get(g.winner!) }} />
-                  {allianceById.get(g.winner!)}{blocOf.get(g.winner!) ? ` (${blocOf.get(g.winner!)})` : ''}
+                  <strong>{allianceById.get(g.winner!)}</strong>
+                  <div className="subtle">{blocOf.get(g.winner!) ?? 'no bloc'}</div>
                 </>}</td>
                 <td>{!g ? <em>no governor</em> : g.wonInStage1
-                  ? `Won in stage 1 (${(g.stage1Shares[g.winner!] * 100).toFixed(1)}%)`
-                  : `Runoff: ${(g.runoff!.shares[g.runoff!.a] * 100).toFixed(1)}% vs ${(g.runoff!.shares[g.runoff!.b] * 100).toFixed(1)}%`}</td>
-                <td>{Object.entries(seatsBy).map(([aid, n]) => (
-                  <span key={aid} className="seat-chip">
-                    <span className="color-dot" style={{ background: colorById.get(aid) }} /> {allianceById.get(aid)}: {n}
-                  </span>
-                ))}</td>
+                  ? <span className="ok-text">Stage 1 win ({(g.stage1Shares[g.winner!] * 100).toFixed(1)}%)</span>
+                  : <span>Runoff: {allianceById.get(g.runoff!.a)} {(g.runoff!.shares[g.runoff!.a] * 100).toFixed(1)}% – {(g.runoff!.shares[g.runoff!.b] * 100).toFixed(1)}% {allianceById.get(g.runoff!.b)}</span>}</td>
+                <td>
+                  <div className="share-bar">
+                    {Object.entries(dr.shares).sort((a: any, b: any) => b[1].finalShare - a[1].finalShare).map(([aid, log]: any) => (
+                      <div key={aid} className="share-seg" title={`${allianceById.get(aid)}: ${(log.finalShare * 100).toFixed(1)}%`}
+                        style={{ width: `${log.finalShare * 100}%`, background: colorById.get(aid) ?? '#999' }} />
+                    ))}
+                  </div>
+                  <div className="share-labels">
+                    {topShares.map(([aid, log]: any) => (
+                      <span key={aid} className="seat-chip">
+                        <span className="color-dot" style={{ background: colorById.get(aid) }} />
+                        {allianceById.get(aid)} {(log.finalShare * 100).toFixed(1)}%
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                <td>
+                  {winnerSeats && <div><strong style={{ color: colorById.get(winnerSeats[0]) }}>
+                    {allianceById.get(winnerSeats[0])} {winnerSeats[1]}/{d.corSeats}
+                  </strong></div>}
+                  <div className="seat-labels">
+                    {Object.entries(seatsBy).sort((a: any, b: any) => b[1] - a[1]).map(([aid, n]) => (
+                      <span key={aid} className="seat-chip">
+                        <span className="color-dot" style={{ background: colorById.get(aid) }} />{allianceById.get(aid)} <strong>{n}</strong>
+                      </span>
+                    ))}
+                  </div>
+                </td>
               </tr>
             );
           })}

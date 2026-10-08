@@ -73,6 +73,7 @@ export interface Party {
   euroGroup: EuroGroup;
   saeimaSeats: number;
   homeDistricts: DistrictName[];
+  runningDistricts: DistrictName[];
   allianceId: string;
   color: string;
 }
@@ -125,6 +126,8 @@ export interface Weights {
   ballotsPerDistrict: number;
   govRunoffNoise: number;
   leanNationalPull: number;
+  homePenalty: number;
+  positionCurve: number;
 }
 
 export interface DistrictOverride {
@@ -157,6 +160,7 @@ export interface ModifierLog {
   finalShare: number; // normalized within district
   rawScore: number;
   votes: number;
+  partyBreakdown?: Record<string, number>;
 }
 
 export interface DistrictResult {

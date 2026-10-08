@@ -34,10 +34,9 @@ export function meekStv(
     else schedule.set(key, { ranking: [...b.ranking], weight: b.weight });
   }
   const sched = [...schedule.values()];
-  const totalWeight = sched.reduce((s, b) => s + b.weight, 0);
-  const quota = droopQuota(totalWeight, seats);
 
-  const active = new Set(candidates);
+  const active = new Set(candidates);        // hopeful or elected
+  const hopeful = new Set(candidates);       // not yet elected/eliminated
   const elected: string[] = [];
   const eliminatedOrder: string[] = [];
   const keep: Record<string, number> = {};
@@ -45,65 +44,70 @@ export function meekStv(
 
   const rounds: MeekRound[] = [];
   let round = 0;
+  let finalQuota = 0;
   const prevTotals: Record<string, number> = {};
 
+  // Meek tally: a ballot's value flows down its ranking; an elected candidate
+  // consumes only keep[c] of the remaining value, and the REST continues to
+  // later preferences. Eliminated candidates (keep=0) consume nothing.
   const tally = (): Record<string, number> => {
     const t: Record<string, number> = {};
     for (const c of active) t[c] = 0;
     for (const b of sched) {
+      let v = b.weight;
       for (const c of b.ranking) {
-        if (active.has(c)) {
-          t[c] += b.weight * keep[c];
-          break;
-        }
+        if (v <= 1e-9) break;
+        if (!active.has(c)) continue;
+        const take = Math.min(v, v * keep[c]);
+        t[c] += take;
+        v -= take;
+        if (hopeful.has(c)) break; // hopeful takes ALL remaining value
       }
+      // any leftover v is non-transferable (exhausted ballot)
     }
     return t;
   };
 
-  while (elected.length < seats && active.size > 0) {
+  while (elected.length < seats && hopeful.size > 0) {
     round++;
     const t = tally();
-    // Elect exactly ONE candidate per round (highest at/above quota) so surplus
-    // reweighting applies before the next election — proper Meek ordering.
-    const overQuota = [...active].filter((c) => t[c] >= quota)
+    const totalVote = Object.values(t).reduce((s, x) => s + x, 0);
+    const seatsLeft = seats - elected.length;
+    const quota = seatsLeft > 0 ? totalVote / (seatsLeft + 1) : totalVote;
+    finalQuota = quota;
+
+    // Elect exactly ONE candidate per round (highest hopeful at/above quota)
+    // so surplus reweighting applies before the next election — proper Meek order.
+    const overQuota = [...hopeful].filter((c) => t[c] >= quota)
       .sort((a, b) => t[b] - t[a]);
-    const newlyElected: string[] = overQuota.length > 0 ? [overQuota[0]] : [];
-    if (newlyElected.length > 0) {
-      for (const c of newlyElected) {
-        elected.push(c);
-        active.delete(c);
-        keep[c] = quota / t[c]; // progressive reweighting (surplus factor)
-      }
+    if (overQuota.length > 0) {
+      const c = overQuota[0];
+      elected.push(c);
+      hopeful.delete(c);
+      keep[c] = quota / t[c]; // progressive reweighting (surplus factor)
       rounds.push({
-        round,
-        quota,
-        tallies: { ...t },
-        keepFactors: { ...keep },
-        elected: newlyElected,
-        eliminated: null,
-        note: `${newlyElected.join(', ')} elected (quota ${quota.toFixed(1)}); keep factors updated.`,
+        round, quota,
+        tallies: { ...t }, keepFactors: { ...keep },
+        elected: [c], eliminated: null,
+        note: `${c} elected (quota ${quota.toFixed(1)}, tally ${t[c].toFixed(1)}); keep factor set to ${keep[c].toFixed(4)}.`,
       });
-      for (const c of Object.keys(prevTotals)) prevTotals[c] = t[c] ?? prevTotals[c];
-      for (const c of candidates) if (t[c] !== undefined) prevTotals[c] = t[c];
+      for (const x of candidates) if (t[x] !== undefined) prevTotals[x] = t[x];
       continue;
     }
-    if (active.size <= seats - elected.length) {
-      const remaining = [...active].sort((a, b) => t[b] - t[a]);
-      for (const c of remaining) {
-        elected.push(c);
-        active.delete(c);
-      }
+    if (hopeful.size <= seatsLeft) {
+      // everyone remaining can be seated
+      const remaining = [...hopeful].sort((a, b) => (t[b] ?? 0) - (t[a] ?? 0));
+      for (const c of remaining) { elected.push(c); hopeful.delete(c); }
       rounds.push({ round, quota, tallies: { ...t }, keepFactors: { ...keep }, elected: remaining, eliminated: null, note: 'Remaining candidates seated to fill vacancies.' });
       break;
     }
     // Eliminate lowest; ties: previous-round totals, then RNG.
     let lowest: string | null = null;
     let lowestVal = Infinity;
-    for (const c of active) {
+    for (const c of hopeful) {
       if (t[c] < lowestVal) { lowestVal = t[c]; lowest = c; }
     }
-    const tied = [...active].filter((c) => Math.abs(t[c] - lowestVal) < 1e-9);
+    const tied = [...hopeful].filter((c) => Math.abs(t[c] - lowestVal) < 1e-9);
     if (tied.length > 1) {
       tied.sort((a, b) => (prevTotals[a] ?? 0) - (prevTotals[b] ?? 0));
       const minPrev = prevTotals[tied[0]] ?? 0;
@@ -118,14 +122,14 @@ export function meekStv(
       rounds.push({ round, quota, tallies: { ...t }, keepFactors: { ...keep }, elected: [], eliminated: lowest, note: `${lowest} eliminated.` });
     }
     active.delete(lowest!);
+    hopeful.delete(lowest!);
     eliminatedOrder.push(lowest!);
     keep[lowest!] = 0;
-    for (const c of candidates) if (t[c] !== undefined) prevTotals[c] = t[c];
+    for (const x of candidates) if (t[x] !== undefined) prevTotals[x] = t[x];
   }
 
   // Degenerate case: fewer candidates than seats. Remaining seats are filled
-  // in reverse elimination order (standard "continue eliminating" practice) so
-  // every seat is always filled.
+  // in reverse elimination order so every seat is always filled.
   if (elected.length < seats) {
     for (const c of [...eliminatedOrder].reverse()) {
       if (elected.length >= seats) break;
@@ -133,5 +137,5 @@ export function meekStv(
     }
   }
 
-  return { elected, rounds, quota, eliminatedOrder };
+  return { elected, rounds, quota: finalQuota, eliminatedOrder };
 }

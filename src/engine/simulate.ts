@@ -28,6 +28,25 @@ export function traitVector(t: DistrictTraits): number[] {
   return TRAIT_KEYS.map((k) => (t as any)[k] ?? 0);
 }
 
+// Standardized trait vector: (x - mean) / sd over the given districts, so that
+// cosine similarity between ideology affinity vectors and district profiles
+// actually discriminates (raw 0–10 scales all point the same direction).
+export function traitVectorsStandardized(districts: District[]): Map<string, number[]> {
+  const map = new Map<string, number[]>();
+  const n = districts.length;
+  for (let i = 0; i < TRAIT_KEYS.length; i++) {
+    const vals = districts.map((d) => (d.traits as any)[TRAIT_KEYS[i]] ?? 0);
+    const mean = vals.reduce((s, x) => s + x, 0) / n;
+    const sd = Math.sqrt(vals.reduce((s, x) => s + (x - mean) ** 2, 0) / n) || 1;
+    districts.forEach((d, j) => {
+      const v = map.get(d.name) ?? new Array(TRAIT_KEYS.length).fill(0);
+      v[i] = (vals[j] - mean) / sd;
+      map.set(d.name, v);
+    });
+  }
+  return map;
+}
+
 export function ideologyVector(ideology: string, secondaries: string[], weights: Weights): number[] {
   const vec = new Array(TRAIT_KEYS.length).fill(0);
   const add = (ideo: string, w: number) => {
@@ -48,6 +67,26 @@ function cosine(a: number[], b: number[]): number {
   for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
   if (na === 0 || nb === 0) return 0;
   return dot / Math.sqrt(na * nb);
+}
+
+// Direct ideology-region affinity: for each trait an ideology cares about,
+// multiply its affinity (-n..+n) by the district's normalized trait (0..1),
+// then average weighted by |affinity|. Result ~1 = neutral, >1 favorable.
+export function affinityScore(ideology: string, secondaries: string[], t: DistrictTraits, w: Weights): number {
+  const ideoScores: { aff: Partial<Record<TraitKey, number>>; weight: number }[] = [
+    { aff: IDEOLOGY_AFFINITIES[ideology] ?? {}, weight: w.dominantIdeologyWeight },
+    ...secondaries.map((sec) => ({ aff: IDEOLOGY_AFFINITIES[sec] ?? {}, weight: w.secondaryIdeologyWeight })),
+  ];
+  let sum = 0, wsum = 0;
+  for (const { aff, weight } of ideoScores) {
+    for (const [k, v] of Object.entries(aff) as [TraitKey, number][]) {
+      const traitVal = ((t as any)[k] ?? 0) / 10; // 0..1
+      sum += v * traitVal * weight * 0.1;
+      wsum += Math.abs(v) * weight * 0.1;
+    }
+  }
+  // sum ranges roughly [-1, 1] for strong matches; center at 1.0
+  return wsum > 0 ? 1 + sum / wsum * Math.min(1, wsum) : 1;
 }
 
 export function positionScore(positions: Position[], dominant: Position): number {
@@ -98,6 +137,14 @@ export interface AllianceComputed {
   partyIds: string[];
   regionalAllianceId: string | null;
   saeimaSeats: number;
+  memberParties: {
+    id: string; name: string;
+    impliedShare: number;
+    positions: Position[];
+    dominantPosition: Position;
+    homeDistricts: Set<string>;
+    runningDistricts: Set<string>;
+  }[];
 }
 
 export function computeAlliances(scenario: Scenario): AllianceComputed[] {
@@ -140,14 +187,25 @@ export function computeAlliances(scenario: Scenario): AllianceComputed[] {
     }
     const home = new Set<string>();
     for (const m of members) for (const d of m.homeDistricts) home.add(d);
+    // Effective districts: alliance checkbox OR any member party running there.
+    const running = new Set<string>(a.runningDistricts);
+    for (const m of members) for (const d of m.runningDistricts) running.add(d);
     out.push({
       id: a.id, name: a.name, color: a.color,
       ideology, secondaryIdeologies: secondaries, positions, dominantPosition: dominant, euPosition: eu,
       nationalShare: implied, seatShare: seatSum / totalSeats,
-      runningDistricts: new Set(a.runningDistricts),
+      runningDistricts: running,
       homeDistricts: home, partyIds: a.memberPartyIds,
       regionalAllianceId: a.regionalAllianceId,
       saeimaSeats: seatSum,
+      memberParties: members.map((m) => ({
+        id: m.id, name: m.name,
+        impliedShare: impliedVoteShare(m.saeimaSeats, totalSeats, w.seatCurveAlpha),
+        positions: m.positions,
+        dominantPosition: m.dominantPosition,
+        homeDistricts: new Set(m.homeDistricts),
+        runningDistricts: new Set(m.runningDistricts),
+      })),
     });
   }
   return out;
@@ -197,20 +255,47 @@ export function runSimulation(scenario: Scenario, districts: District[]): Simula
     const shares: Record<string, ModifierLog> = {};
     let total = 0;
     const rawScores: Record<string, number> = {};
-    for (const a of running) {
-      let base = a.nationalShare * d.traits.population;
-      const ideologyFitRaw = cosine(ideologyVector(a.ideology, a.secondaryIdeologies, w), traitVector(d.traits));
-      const ideologyFit = clamp(0.75 + 0.35 * Math.max(0, ideologyFitRaw), w.ideologyMin, w.ideologyMax);
+    const rawMeta: Record<string, any> = {};
+    interface ScoreMeta { score: number; breakdown: Record<string, number>; ideologyFit: number; positionFit: number; eu: number; inc: number; noise: number; base: number; }
+    const scoreAlliance = (a: AllianceComputed): ScoreMeta => {
+      const ideologyFitRaw = affinityScore(a.ideology, a.secondaryIdeologies, d.traits, w);
+      // Map affinity score into [ideologyMin, ideologyMax] with 1.0 at neutral.
+      const ideologyFit = clamp(
+        1 + (ideologyFitRaw - 1) * 1.6,
+        w.ideologyMin, w.ideologyMax);
       const aPos = positionScore(a.positions, a.dominantPosition);
       const posDist = Math.abs(aPos - leanOf(d));
-      const positionFit = clamp(1.05 - 0.06 * posDist * posDist, w.positionMin, w.positionMax);
+      // Symmetric Gaussian: same closeness bonus/penalty on both sides.
+      const positionFit = clamp(Math.exp(-0.5 * (posDist / w.positionCurve) ** 2), w.positionMin, w.positionMax);
       const eu = euEffect(a.euPosition, d.traits.euEnthusiasm, w);
-      const home = a.homeDistricts.has(d.name) || a.runningDistricts.has(d.name) ? w.homeBonus : 1;
       const incumbentId = scenario.incumbentGovernors[d.name];
       const inc = incumbentId && incumbentId === a.id ? w.incumbentBonus : 1;
       const noise = dRng.logNormal(w.noiseSigma);
-      const score = base * ideologyFit * positionFit * eu * home * inc * noise;
-      rawScores[a.id] = score;
+      // Base: sum of member-party scores. Each party contributes its implied
+      // national share scaled by population, with its OWN home-district effect:
+      // bonus if this is its home district, small penalty otherwise (a party
+      // concentrates where it is based). Parties not running here contribute 0.
+      const popFactor = d.traits.population;
+      let partySum = 0;
+      const breakdown: Record<string, number> = {};
+      for (const mp of a.memberParties) {
+        if (mp.runningDistricts.size > 0 && !mp.runningDistricts.has(d.name) && !a.runningDistricts.has(d.name)) continue;
+        const homeEff = mp.homeDistricts.has(d.name) ? w.homeBonus : w.homePenalty;
+        const pv = mp.impliedShare * popFactor * homeEff;
+        breakdown[mp.id] = pv;
+        partySum += pv;
+      }
+      if (partySum === 0) partySum = a.nationalShare * popFactor * w.homePenalty;
+      return {
+        score: partySum * ideologyFit * positionFit * eu * inc * noise,
+        breakdown,
+        ideologyFit, positionFit, eu, inc, noise, base: partySum,
+      };
+    };
+    for (const a of running) {
+      const r = scoreAlliance(a);
+      rawScores[a.id] = r.score;
+      rawMeta[a.id] = r;
     }
     // Apply overrides: locked shares fixed; non-locked scores renormalized over remainder.
     const locked: Record<string, number> = {};
@@ -226,25 +311,18 @@ export function runSimulation(scenario: Scenario, districts: District[]): Simula
     for (const a of running) {
       if (a.id in locked) {
         shares[a.id] = {
-          baseShare: a.nationalShare * d.traits.population, ideologyFit: 0, positionFit: 0,
+          baseShare: 0, ideologyFit: 0, positionFit: 0,
           euEffect: 0, homeBonus: 0, incumbencyBonus: 0, noise: 0,
           finalShare: locked[a.id], rawScore: locked[a.id], votes: Math.round(locked[a.id] * w.ballotsPerDistrict),
         };
       } else {
-        const sh = rawScores[a.id];
-        const ideologyFitRaw = cosine(ideologyVector(a.ideology, a.secondaryIdeologies, w), traitVector(d.traits));
-        const ideologyFit = clamp(0.75 + 0.35 * Math.max(0, ideologyFitRaw), w.ideologyMin, w.ideologyMax);
-        const aPos = positionScore(a.positions, a.dominantPosition);
-        const posDist = Math.abs(aPos - leanOf(d));
-        const positionFit = clamp(1.05 - 0.06 * posDist * posDist, w.positionMin, w.positionMax);
-        const eu = euEffect(a.euPosition, d.traits.euEnthusiasm, w);
-        const home = a.homeDistricts.has(d.name) || a.runningDistricts.has(d.name) ? w.homeBonus : 1;
-        const incumbentId = scenario.incumbentGovernors[d.name];
-        const inc = incumbentId && incumbentId === a.id ? w.incumbentBonus : 1;
+        const m = rawMeta[a.id];
         shares[a.id] = {
-          baseShare: a.nationalShare * d.traits.population, ideologyFit, positionFit,
-          euEffect: eu, homeBonus: home, incumbencyBonus: inc, noise: 0,
-          finalShare: sh, rawScore: sh, votes: Math.round(sh * w.ballotsPerDistrict),
+          baseShare: m.base, ideologyFit: m.ideologyFit, positionFit: m.positionFit,
+          euEffect: m.eu, homeBonus: w.homeBonus, incumbencyBonus: m.inc, noise: 1,
+          finalShare: rawScores[a.id], rawScore: rawScores[a.id],
+          votes: Math.round(rawScores[a.id] * w.ballotsPerDistrict),
+          partyBreakdown: m.breakdown,
         };
       }
       total += shares[a.id].finalShare;

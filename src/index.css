@@ -66,3 +66,20 @@ label.inline { flex-direction: row; align-items: center; gap: 6px; }
 .file-btn input { display: none; }
 h3 { margin: 18px 0 8px; font-size: 17px; color: #0f172a; }
 h4 { margin: 12px 0 6px; font-size: 14px; }
+
+/* Parliament diagram legend */
+.parliament-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 10px 4px; }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid rgb(0 0 0 / 15%); }
+.legend-cols { display: flex; gap: 24px; flex-wrap: wrap; padding: 8px 0; }
+.legend-col { min-width: 180px; }
+.legend-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin-bottom: 4px; }
+.manual-block { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; padding: 8px; background: #f8fafc; border-radius: 6px; }
+.row-actions { white-space: nowrap; }
+.small-text { font-size: 11px; color: #64748b; }
+.subtle { font-size: 11px; color: #64748b; }
+.share-bar { display: flex; height: 14px; border-radius: 4px; overflow: hidden; min-width: 220px; border: 1px solid #e2e8f0; }
+.share-seg { height: 100%; }
+.share-labels { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 3px; }
+.seat-labels { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 2px; }
+.ok-text { color: #15803d; font-weight: 600; }

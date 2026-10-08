@@ -44,17 +44,23 @@ large parties below 1 (vote share slightly **below** seat share) — a gentle di
 Per alliance-district score:
 
 ```
-score = base × ideologyFit × positionFit × euEffect × homeBonus × incumbency × noise
+score = Σ party base × ideologyFit × positionFit × euEffect × incumbency × noise
 ```
 
-1. **Base**: alliance implied national share × district population.
-2. **Ideology fit** (×0.75–×1.35): cosine similarity between the alliance's weighted ideology
-   vector (dominant ×2.0, secondaries ×0.5 each) and the district trait vector.
-3. **Position fit** (×0.8–×1.2): quadratic distance between weighted alliance position and
-   district political lean.
+1. **Base (party-level)**: each member party contributes its implied national share ×
+   district population, with its own home-district effect: ×homeBonus (default 2.3) in its
+   home districts, ×homePenalty (default 0.55) everywhere else. A party with no home
+   districts runs evenly everywhere. A party's running districts can also be restricted —
+   it contributes 0 outside them (an alliance runs in a district if the alliance or any
+   member party is marked as running there).
+2. **Ideology fit** (×0.5–×1.7): direct affinity score — each trait the ideology cares
+   about is multiplied by the district's normalized trait value, weighted (dominant ×2.0,
+   secondaries ×0.5), then mapped around 1.0.
+3. **Position fit** (×0.55–×1.3): symmetric Gaussian of the distance between the alliance's
+   weighted position and the district's dynamic lean.
 4. **EU effect** (×0.85–×1.15): asymmetric — Pro-EU overperforms in high-enthusiasm districts;
    hard anti-EU is the mirror image; soft anti-EU is a weakened version (`euSoftFactor`).
-5. **Home bonus** ×1.10 for alliances based/running there; **incumbency** ×1.05.
+5. **Incumbency** ×1.05 for the sitting governor's alliance.
 6. **Noise**: log-normal, σ = 0.03, from a seeded RNG (seed shown & editable; results record it).
 
 **Dynamic regional lean**: before each run, the national implied lean is computed from the
