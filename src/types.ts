@@ -73,6 +73,7 @@ export interface Party {
   euroGroup: EuroGroup;
   saeimaSeats: number;
   homeDistricts: DistrictName[];
+  homeConcentration: number; // 1 = global homeBonus; >1 more concentrated, <1 broader
   runningDistricts: DistrictName[];
   allianceId: string;
   color: string;

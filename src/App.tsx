@@ -117,7 +117,7 @@ function PartiesTab() {
   const [form, setForm] = useState<Partial<Party>>({
     name: '', ideology: IDEOLOGIES[0], secondaryIdeologies: [], positions: ['Center'],
     dominantPosition: 'Center', euPosition: 'Pro-EU', euroGroup: 'NI', saeimaSeats: 0,
-    homeDistricts: [], runningDistricts: [], allianceId: '', color: '#8899aa',
+    homeDistricts: [], homeConcentration: 1, runningDistricts: [], allianceId: '', color: '#8899aa',
   });
   const [editId, setEditId] = useState<string | null>(null);
   const set = (patch: Partial<Party>) => setForm((f) => ({ ...f, ...patch }));
@@ -137,7 +137,7 @@ function PartiesTab() {
     }
     setForm({ name: '', ideology: IDEOLOGIES[0], secondaryIdeologies: [], positions: ['Center'],
       dominantPosition: 'Center', euPosition: 'Pro-EU', euroGroup: 'NI', saeimaSeats: 0,
-      homeDistricts: [], runningDistricts: [], allianceId: form.allianceId, color: '#8899aa' });
+      homeDistricts: [], homeConcentration: 1, runningDistricts: [], allianceId: form.allianceId, color: '#8899aa' });
   };
   return (
     <div className="panel">
@@ -192,6 +192,11 @@ function PartiesTab() {
                 onClick={() => set({ homeDistricts: toggleIn(form.homeDistricts!, d as DistrictName) })}>{d}</button>
             ))}
           </div>
+        </label>
+        <label>🎯 Home concentration: {form.homeConcentration ?? 1}×
+          <input type="range" min="0.5" max="2" step="0.1" value={form.homeConcentration ?? 1}
+            onChange={(e) => set({ homeConcentration: +e.target.value })} />
+          <span className="hint">1 = normal regional base; above 1 = regionalist list (dominates its home districts); below 1 = spread out</span>
         </label>
         <label>🏃 Running districts (empty = runs wherever its alliance runs)
           <div className="chips">

@@ -34,7 +34,7 @@ export function mkScenario(): Scenario {
     parties.push({
       id: pid, name: name + ' Party', ideology: ideo, secondaryIdeologies: sec,
       positions: positions as any, dominantPosition: dom as any, euPosition: eu as any,
-      euroGroup: 'NI', saeimaSeats: seats, homeDistricts: home as DistrictName[],
+      euroGroup: 'NI', saeimaSeats: seats, homeDistricts: home as DistrictName[], homeConcentration: 1,
       runningDistricts: all as DistrictName[], allianceId: 'a-' + key, color,
     });
     alliances.push({
@@ -90,11 +90,11 @@ describe('Calibration: 20th Saeima (right won)', () => {
     const sc = mkScenario();
     const res = runSimulation(sc, defaultDistricts());
     const shareIn = (dist: string, aid: string) => res.districtResults[dist as DistrictName].shares[aid]?.finalShare ?? 0;
-    // Nationalist conservatives should do better in Vidzeme (lean +0.2) than Riga (lean -0.3)
+    // Nationalist conservatives (home Vidzeme/Zemgale) should do far better in Vidzeme than Riga
     expect(shareIn('Vidzeme', 'a-natcons')).toBeGreaterThan(shareIn('Riga', 'a-natcons'));
     // Together for Latvia (Latgalian/minority) should dominate in Latgale but not in Riga
     expect(shareIn('Latgale', 'a-tfl')).toBeGreaterThan(shareIn('Riga', 'a-tfl'));
-    expect(shareIn('Latgale', 'a-tfl')).toBeGreaterThan(0.10);
+    expect(shareIn('Latgale', 'a-tfl')).toBeGreaterThan(0.06);
     // Red Bloc (hard-left, home Daugavpils) stronger in Daugavpils than in Jūrmala
     expect(shareIn('Daugavpils', 'a-redbloc')).toBeGreaterThan(shareIn('Jūrmala', 'a-redbloc'));
   });

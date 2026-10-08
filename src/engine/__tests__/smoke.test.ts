@@ -7,7 +7,7 @@ function mk(lean: number, partyPos: string, seats: number[]): Scenario {
   const parties: Party[] = []; const alliances: Alliance[] = [];
   const all = defaultDistricts().map((d) => d.name);
   seats.forEach((s, i) => {
-    const p: Party = { id: 'p'+i, name: 'P'+i, ideology: 'Centrism', secondaryIdeologies: [], positions: [partyPos as any], dominantPosition: partyPos as any, euPosition: 'Pro-EU', euroGroup: 'NI', saeimaSeats: s, homeDistricts: [], runningDistricts: [], allianceId: 'a'+i, color: '#888' };
+    const p: Party = { id: 'p'+i, name: 'P'+i, ideology: 'Centrism', secondaryIdeologies: [], positions: [partyPos as any], dominantPosition: partyPos as any, euPosition: 'Pro-EU', euroGroup: 'NI', saeimaSeats: s, homeDistricts: [], homeConcentration: 1, runningDistricts: [], allianceId: 'a'+i, color: '#888' };
     const a: Alliance = { id: 'a'+i, name: 'A'+i, color: '#123456', memberPartyIds: [p.id], autoIdeology: true, autoPosition: true, autoEuPosition: true, runningDistricts: all as any, saeimaStatus: i === 0 ? 'Government' : 'Opposition', regionalAllianceId: null };
     parties.push(p); alliances.push(a);
   });

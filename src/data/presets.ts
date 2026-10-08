@@ -72,9 +72,9 @@ export function defaultDistrictTraits(d: DistrictName): any {
     Jūrmala: { urbanization: 8, income: 7.5, education: 7, elderly: 7, religiosity: 3, agrarian: 0.5, heavyIndustry: 0.5, services: 7.5, coastal: 7, transit: 4, minority: 5, latgalianIdentity: 0, euEnthusiasm: 8, lean: -0.4 },
     Ventspils: { urbanization: 6, income: 6.5, education: 5.5, elderly: 6, religiosity: 4.5, agrarian: 2, heavyIndustry: 4, services: 5, coastal: 9, transit: 7, minority: 4, latgalianIdentity: 0, euEnthusiasm: 6.5, lean: 0.1 },
     Rēzekne: { urbanization: 4, income: 4, education: 4.5, elderly: 7.5, religiosity: 8.5, agrarian: 5, heavyIndustry: 4, services: 3, coastal: 0, transit: 5, minority: 9, latgalianIdentity: 9, euEnthusiasm: 4, lean: 0.8 },
-    Valmiera: { urbanization: 5, income: 6, education: 6, elderly: 6, religiosity: 5, agrarian: 5, heavyIndustry: 4, services: 5.5, coastal: 1, transit: 5, minority: 2, latgalianIdentity: 0, euEnthusiasm: 6.5, lean: 0.1 },
-    Jēkabpils: { urbanization: 4, income: 5, education: 5, elderly: 7, religiosity: 6, agrarian: 6, heavyIndustry: 3, services: 3.5, coastal: 0, transit: 5, minority: 3, latgalianIdentity: 0, euEnthusiasm: 5.5, lean: 0.3 },
-    Cēsis: { urbanization: 5, income: 6, education: 6.5, elderly: 6, religiosity: 5, agrarian: 4, heavyIndustry: 2, services: 5, coastal: 1, transit: 4, minority: 2, latgalianIdentity: 0, euEnthusiasm: 7.5, lean: 0.0 },
+    Valmiera: { urbanization: 5, income: 6, education: 6, elderly: 6, religiosity: 5, agrarian: 5, heavyIndustry: 4, services: 5.5, coastal: 1, transit: 5, minority: 2, latgalianIdentity: 0, euEnthusiasm: 6.5, lean: 0.4 },
+    Jēkabpils: { urbanization: 4, income: 5, education: 5, elderly: 7, religiosity: 6, agrarian: 6, heavyIndustry: 3, services: 3.5, coastal: 0, transit: 5, minority: 3, latgalianIdentity: 0, euEnthusiasm: 5.5, lean: 0.5 },
+    Cēsis: { urbanization: 5, income: 6, education: 6.5, elderly: 6, religiosity: 5, agrarian: 4, heavyIndustry: 2, services: 5, coastal: 1, transit: 4, minority: 2, latgalianIdentity: 0, euEnthusiasm: 7.5, lean: 0.3 },
     'Living Outside Latvia': { urbanization: 8, income: 7.5, education: 8.5, elderly: 3, religiosity: 3, agrarian: 1, heavyIndustry: 1, services: 8, coastal: 1, transit: 2, minority: 5, latgalianIdentity: 0, euEnthusiasm: 9.5, lean: -0.6 },
   } as Record<DistrictName, any>;
   return { population: population[d], ...base[d] };
@@ -170,7 +170,7 @@ export const DEFAULT_WEIGHTS: Weights = {
   positionMax: 1.3,
   euMin: 0.85,
   euMax: 1.15,
-  homeBonus: 2.3,
+  homeBonus: 4.5,
   incumbentBonus: 1.05,
   noiseSigma: 0.03,
   crossEndorsementProb: 0.70,
@@ -185,9 +185,9 @@ export const DEFAULT_WEIGHTS: Weights = {
   euSoftFactor: 0.5,
   ballotsPerDistrict: 100000,
   govRunoffNoise: 0.03,
-  leanNationalPull: 0.15,
-  homePenalty: 0.55,
-  positionCurve: 1.5,
+  leanNationalPull: 0.5,
+  homePenalty: 1.0,
+  positionCurve: 2.2,
 };
 
 export const SEAT_TOTAL_CHECK = DISTRICT_ORDER.reduce((s, d) => s + DISTRICT_SEATS[d], 0);

@@ -9,7 +9,7 @@ function mkAlliance(id: string, name: string, seats: number, districts: string[]
   const party: Party = {
     id: 'p-' + id, name: name + ' Party', ideology: 'Centrism', secondaryIdeologies: [],
     positions: ['Center'], dominantPosition: 'Center', euPosition: 'Pro-EU', euroGroup: 'NI',
-    saeimaSeats: seats, homeDistricts: [], runningDistricts: [], allianceId: id, color: '#888888',
+    saeimaSeats: seats, homeDistricts: [], homeConcentration: 1, runningDistricts: [], allianceId: id, color: '#888888',
   };
   const a: Alliance = {
     id, name, color: '#123456', memberPartyIds: [party.id], autoIdeology: true, autoPosition: true,

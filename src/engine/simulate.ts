@@ -144,6 +144,7 @@ export interface AllianceComputed {
     dominantPosition: Position;
     homeDistricts: Set<string>;
     runningDistricts: Set<string>;
+    homeConcentration: number;
   }[];
 }
 
@@ -205,6 +206,7 @@ export function computeAlliances(scenario: Scenario): AllianceComputed[] {
         dominantPosition: m.dominantPosition,
         homeDistricts: new Set(m.homeDistricts),
         runningDistricts: new Set(m.runningDistricts),
+        homeConcentration: m.homeConcentration ?? 1,
       })),
     });
   }
@@ -271,21 +273,31 @@ export function runSimulation(scenario: Scenario, districts: District[]): Simula
       const incumbentId = scenario.incumbentGovernors[d.name];
       const inc = incumbentId && incumbentId === a.id ? w.incumbentBonus : 1;
       const noise = dRng.logNormal(w.noiseSigma);
-      // Base: sum of member-party scores. Each party contributes its implied
-      // national share scaled by population, with its OWN home-district effect:
-      // bonus if this is its home district, small penalty otherwise (a party
-      // concentrates where it is based). Parties not running here contribute 0.
-      const popFactor = d.traits.population;
+      // Base: sum of member-party scores, each distributed by a concentration
+      // model. A party's per-district weight = population × (home ? concentration
+      // : 1), normalized over the districts it runs in, so its total across the
+      // country equals its implied national share × total population. Regional
+      // parties (few home districts) dominate their turf; broad parties stay even.
+      const districtsOf = (mp: AllianceComputed['memberParties'][number]) =>
+        mp.runningDistricts.size > 0
+          ? districts.filter((x) => mp.runningDistricts.has(x.name) || a.runningDistricts.has(x.name))
+          : districts.filter((x) => a.runningDistricts.has(x.name));
       let partySum = 0;
       const breakdown: Record<string, number> = {};
       for (const mp of a.memberParties) {
-        if (mp.runningDistricts.size > 0 && !mp.runningDistricts.has(d.name) && !a.runningDistricts.has(d.name)) continue;
-        const homeEff = mp.homeDistricts.has(d.name) ? w.homeBonus : w.homePenalty;
-        const pv = mp.impliedShare * popFactor * homeEff;
+        const runs = districtsOf(mp);
+        if (runs.length === 0 || !runs.some((x) => x.name === d.name)) continue;
+        const weightOf = (x: District) =>
+          x.traits.population * (mp.homeDistricts.has(x.name) ? w.homeBonus * mp.homeConcentration : 1);
+        const totalWeight = runs.reduce((sm, x) => sm + weightOf(x), 0) || 1;
+        const pv = mp.impliedShare * (weightOf(d) / totalWeight);
         breakdown[mp.id] = pv;
         partySum += pv;
       }
-      if (partySum === 0) partySum = a.nationalShare * popFactor * w.homePenalty;
+      if (partySum === 0) {
+        const totalPop = districts.reduce((sm, x) => sm + x.traits.population, 0) || 1;
+        partySum = a.nationalShare * (d.traits.population / totalPop);
+      }
       return {
         score: partySum * ideologyFit * positionFit * eu * inc * noise,
         breakdown,
@@ -355,7 +367,7 @@ export function runSimulation(scenario: Scenario, districts: District[]): Simula
 
     let governor: GovernorResult | undefined;
     if (d.electsGovernor) {
-      governor = runGovernor(running, shares, w, dRng, byId);
+      governor = runGovernor(running, shares, w, dRng, byId, ballots);
       if (governor?.winner) {
         governors[d.name] = governor.winner;
         jointSessionWeights[governor.winner] = (jointSessionWeights[governor.winner] ?? 0) + 2;
@@ -428,6 +440,7 @@ function runGovernor(
   running: AllianceComputed[], shares: Record<string, ModifierLog>,
   w: Weights, rng: Rng,
   byId: Map<string, AllianceComputed>,
+  ballots: WeightedBallot[],
 ): GovernorResult {
   // One candidate per bloc (strongest alliance in district) + one per bloc-less alliance.
   const inDistrict = [...running].sort((a, b) => (shares[b.id]?.finalShare ?? 0) - (shares[a.id]?.finalShare ?? 0));
@@ -445,16 +458,39 @@ function runGovernor(
       candAllianceOf[a.id] = a.id;
     }
   }
-  // Stage 1: each ballot goes to the candidate whose bloc contains its first preference.
+  // Stage 1: a bloc fields ONE candidate (its locally strongest alliance). Most
+  // of a bloc's voters back that candidate, but a share defects to ideologically
+  // closer non-bloc candidates (bloc fidelity is high but not absolute) —
+  // this prevents the bloc's national leader from sweeping every district.
+  const BLOC_FIDELITY = 0.75;
   const stage1: Record<string, number> = {};
   for (const c of candidates) stage1[c.allianceId] = 0;
-  let valid = 0;
+  const candPos = (id: string) => positionScore(byId.get(id)!.positions, byId.get(id)!.dominantPosition);
   for (const c of candidates) {
+    const candPosOwn = candPos(c.allianceId);
     for (const aid of c.blocAllianceIds) {
-      stage1[c.allianceId] += (shares[aid]?.finalShare ?? 0) * w.ballotsPerDistrict;
+      const aidShare = (shares[aid]?.finalShare ?? 0) * w.ballotsPerDistrict;
+      const isCandidateItself = aid === c.allianceId;
+      if (isCandidateItself || c.blocAllianceIds.length === 1) {
+        stage1[c.allianceId] += aidShare;
+        continue;
+      }
+      // bloc partner vote: fidelity share stays, remainder splits to closer
+      // non-bloc candidates by ideological distance (or abstains)
+      stage1[c.allianceId] += aidShare * BLOC_FIDELITY;
+      const defectors = aidShare * (1 - BLOC_FIDELITY);
+      const others = candidates.filter((o) => o.allianceId !== c.allianceId);
+      if (others.length > 0) {
+        const dists = others.map((o) => Math.exp(-Math.abs(candPos(aid) - candPosOwn - (candPos(aid) - candPos(o.allianceId)))));
+        void dists;
+        // split defectors across non-bloc candidates by closeness of voter to candidate
+        const wts = others.map((o) => Math.exp(-Math.abs(candPos(aid) - candPos(o.allianceId))));
+        const wsum = wts.reduce((sm, x) => sm + x, 0) || 1;
+        others.forEach((o, i) => { stage1[o.allianceId] += defectors * (wts[i] / wsum); });
+      }
     }
   }
-  valid = Object.values(stage1).reduce((s, x) => s + x, 0);
+  const valid = Object.values(stage1).reduce((s, x) => s + x, 0);
   const stage1Shares: Record<string, number> = {};
   for (const [k, v] of Object.entries(stage1)) stage1Shares[k] = valid > 0 ? v / valid : 0;
   for (const c of candidates) c.stage1Share = stage1Shares[c.allianceId] ?? 0;
@@ -472,20 +508,44 @@ function runGovernor(
   const A = sorted[0].allianceId, B = sorted[1].allianceId;
   const runoffShares: Record<string, number> = { [A]: 0, [B]: 0 };
   const transfers: Record<string, string> = {};
+  const runoffAbstain = 0.35; // share of non-bloc transfers that abstain
   for (const c of sorted.slice(2)) {
-    // votes of eliminated candidate transfer: same bloc if present, else closest ideologically
+    // Votes of an eliminated candidate transfer: (a) to a runoff candidate from
+    // the same bloc if one is present (full transfer); otherwise (b) split by
+    // ideological closeness, with a share of voters abstaining instead.
     const blocId = byId.get(c.allianceId)!.regionalAllianceId;
     const blocCand = [A, B].find((x) => byId.get(x)!.regionalAllianceId && byId.get(x)!.regionalAllianceId === blocId);
-    let target: string;
-    if (blocCand) target = blocCand;
-    else {
+    const cShare = stage1Shares[c.allianceId] ?? 0;
+    if (blocCand) {
+      transfers[c.allianceId] = blocCand;
+      runoffShares[blocCand] += cShare;
+    } else {
+      // Non-bloc transfer: voters follow their list's local alignment. The
+      // ballot schedule already encodes whose voters rank whom next (district
+      // affinity), so use the district's ballot preference order: measure how
+      // often c's voters rank A vs B higher (weighted schedule), fall back to
+      // position distance.
+      const countAbove = (target: string): number => {
+        let total = 0;
+        for (const b of ballots) {
+          const idxC = b.ranking.indexOf(c.allianceId);
+          const idxT = b.ranking.indexOf(target);
+          if (idxC >= 0 && idxT >= 0 && idxT > idxC) total += b.weight * (1 / (1 + idxT - idxC));
+        }
+        return total;
+      };
+      const wA = countAbove(A), wB = countAbove(B);
       const posA = positionScore(byId.get(A)!.positions, byId.get(A)!.dominantPosition);
       const posB = positionScore(byId.get(B)!.positions, byId.get(B)!.dominantPosition);
       const posC = positionScore(byId.get(c.allianceId)!.positions, byId.get(c.allianceId)!.dominantPosition);
-      target = Math.abs(posC - posA) <= Math.abs(posC - posB) ? A : B;
+      const ideow = Math.exp(-Math.abs(posC - posA)), ideowB = Math.exp(-Math.abs(posC - posB));
+      const numA = wA + ideow, numB = wB + ideowB;
+      const transferable = cShare * (1 - runoffAbstain);
+      const fA = numA / (numA + numB || 1);
+      runoffShares[A] += transferable * fA;
+      runoffShares[B] += transferable * (1 - fA);
+      transfers[c.allianceId] = `split ${(100 * transferable * fA).toFixed(0)}%→${byId.get(A)?.name}`;
     }
-    transfers[c.allianceId] = target;
-    runoffShares[target] += (stage1Shares[c.allianceId] ?? 0);
   }
   runoffShares[A] += stage1Shares[A] ?? 0;
   runoffShares[B] += stage1Shares[B] ?? 0;

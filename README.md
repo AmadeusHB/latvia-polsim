@@ -47,12 +47,18 @@ Per alliance-district score:
 score = Σ party base × ideologyFit × positionFit × euEffect × incumbency × noise
 ```
 
-1. **Base (party-level)**: each member party contributes its implied national share ×
-   district population, with its own home-district effect: ×homeBonus (default 2.3) in its
-   home districts, ×homePenalty (default 0.55) everywhere else. A party with no home
-   districts runs evenly everywhere. A party's running districts can also be restricted —
-   it contributes 0 outside them (an alliance runs in a district if the alliance or any
-   member party is marked as running there).
+1. **Base (party-level concentration model)**: each member party's implied national
+   vote is distributed across the districts it runs in, proportional to
+   `population × (home ? homeBonus × homeConcentration : 1)`, normalized so its national
+   total is preserved. Regionalist lists (high `homeConcentration`) dominate their home
+   turf; broad national parties stay even. A party with no home districts runs evenly
+   everywhere. Parties can be restricted to specific running districts (they contribute
+   0 outside them; an alliance runs wherever it or any member party runs).
+
+The model is calibrated against three reference elections (20th right-win, 24th center-win,
+25th left-win Saeima) encoded in `src/engine/__tests__/reference.test.ts`: governor winners
+match the reference in ~85% of districts (46/54) across all three, with exact 150/18 totals,
+no alliance sweeps, and regionalists winning their homelands.
 2. **Ideology fit** (×0.5–×1.7): direct affinity score — each trait the ideology cares
    about is multiplied by the district's normalized trait value, weighted (dominant ×2.0,
    secondaries ×0.5), then mapped around 1.0.
@@ -84,6 +90,10 @@ overridden districts are highlighted and exported.
 - Elimination ties: previous-round totals, then seeded RNG.
 - Ballot preferences: bloc cross-endorsement first (default 70% probability), then
   ideological/position similarity.
+- Governor stage 1: blocs field one candidate (locally strongest member); bloc partner
+  voters back it at 75% fidelity, the rest defect to ideologically closer candidates.
+  Runoff transfers: same-bloc full transfer; otherwise a closeness split with 35%
+  abstention, weighted by the district's ballot-preference schedule.
 
 ## Governor elections (two-stage, per district except diaspora)
 
