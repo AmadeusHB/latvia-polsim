@@ -6,6 +6,7 @@ import {
 } from './data/presets';
 import { SaeimaArc, WestminsterDiagram } from './components/Diagrams';
 import { euAffiliationWeights, computeAlliances } from './engine/simulate';
+import { BUILTIN_TEMPLATES } from './data/builtinTemplates';
 
 type Tab = 'scenarios' | 'parties' | 'alliances' | 'blocs' | 'districts' | 'overrides' | 'weights' | 'results';
 
@@ -101,7 +102,17 @@ function ScenariosTab() {
           </li>
         ))}
       </ul>
-      <h3>Templates</h3>
+      <h3>Built-in Templates</h3>
+      <ul className="entity-list">
+        {BUILTIN_TEMPLATES.map((t) => (
+          <li key={t.label}>
+            <span><strong>{t.label}</strong></span>
+            <button className="primary" onClick={() => store.loadBuiltinTemplate(t.label)}>Load as new scenario</button>
+          </li>
+        ))}
+      </ul>
+      <hr className="section-divider" />
+      <h3>Your Templates</h3>
       <ul className="entity-list">
         {templates.length === 0 && <li className="meta">No templates saved yet.</li>}
         {templates.map((t) => (

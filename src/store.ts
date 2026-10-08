@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Scenario, Party, Alliance, RegionalAlliance, Weights, DistrictName } from './types';
 import { DEFAULT_WEIGHTS } from './data/presets';
+import { BUILTIN_TEMPLATES } from './data/builtinTemplates';
 import { runSimulation, validateScenario } from './engine/simulate';
 import { defaultDistricts } from './data/presets';
 
@@ -47,6 +48,7 @@ interface Store {
   saveAsTemplate(): void;
   loadTemplate(id: string): void;
   deleteTemplate(id: string): void;
+  loadBuiltinTemplate(label: string): void;
   importScenario(json: string): boolean;
 }
 
@@ -171,6 +173,13 @@ export const useStore = create<Store>((set, get) => ({
     get().persist();
   },
   deleteTemplate(id) { set((st) => ({ templates: st.templates.filter((t) => t.id !== id) })); get().persist(); },
+  loadBuiltinTemplate(label: string) {
+    const tpl = BUILTIN_TEMPLATES.find((t) => t.label === label);
+    if (!tpl) return;
+    const copy = JSON.parse(JSON.stringify(tpl.build()));
+    set((st) => ({ scenarios: [...st.scenarios, copy], activeId: copy.id }));
+    get().persist();
+  },
   importScenario(json: string): boolean {
     try {
       const data = JSON.parse(json);
