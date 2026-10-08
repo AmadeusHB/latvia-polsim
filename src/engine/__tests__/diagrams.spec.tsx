@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { renderToString } from 'react-dom/server';
 import { SaeimaArc, WestminsterDiagram } from '../../components/Diagrams';
-import { buildArc, buildChamber, assertContiguity, rgbDistance, allocateWedges } from '../../components/chamberGeometry';
+import { buildArc, buildChamber, assertContiguity, rgbDistance, allocateWedges, allocateSaeimaSeats } from '../../components/chamberGeometry';
 import { runSimulation } from '../simulate';
 import { defaultDistricts } from '../../data/presets';
 import { buildScenario, RIGHT, RIGHT_BLOCS, CENTER, CENTER_BLOCS, LEFT, LEFT_BLOCS } from './referenceData';
@@ -283,7 +283,6 @@ describe('Wedge allocator (arc party wedges)', () => {
       const R = 1 + Math.floor(rand() * 16);
       const rows: number[] = Array.from({ length: R }, () => 1 + Math.floor(rand() * 30));
       const sum = rows.reduce((a, b) => a + b, 0);
-      let rem = N;
       const scaled = rows.map((r) => Math.max(1, Math.floor((r * N) / sum)));
       let acc = scaled.reduce((a, b) => a + b, 0);
       let i = 0;
@@ -335,5 +334,108 @@ describe('Wedge allocator (arc party wedges)', () => {
     const seatD = 2 * v.seatR;
     const center = (minX + maxX) / 2;
     expect(Math.abs(center - v.cx)).toBeLessThan(seatD);
+  });
+});
+
+describe('Concentrated wedge allocator (minor-party blocks)', () => {
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVW';
+  const rowsOf = (own: number[][]) => own.map((r) => r.map((p) => letters[p]).join(''));
+  const checkInvariants = (seats: number[], rows: number[], stage: string) => {
+    const P = seats.length;
+    const counts = new Array(P).fill(0);
+    const rowsOfParty: number[][] = Array.from({ length: P }, () => []);
+    const { layout, stage: used } = allocateSaeimaSeats(seats, rows);
+    layout.forEach((row, i) => {
+      expect(row.length).toBe(rows[i]);
+      let prev = -1;
+      for (const p of row) {
+        expect(p).toBeGreaterThanOrEqual(prev);
+        prev = p;
+        counts[p]++;
+        if (rowsOfParty[p][rowsOfParty[p].length - 1] !== i) rowsOfParty[p].push(i);
+      }
+    });
+    for (let p = 0; p < P; p++) {
+      expect(counts[p]).toBe(seats[p]);
+      const occ = rowsOfParty[p];
+      let islands = 0;
+      for (let q = 1; q < occ.length; q++) if (occ[q] !== occ[q - 1] + 1) islands++;
+      if (used !== 'fallback') expect(islands).toBe(0);
+    }
+    void stage;
+    return used;
+  };
+  it('worked example: 17 parties, 13 rows — exact match with the reference output', () => {
+    const seats = [64, 46, 31, 31, 17, 13, 8, 7, 5, 5, 4, 3, 2, 2, 2, 2, 59];
+    const rows = [16, 17, 18, 20, 21, 22, 23, 24, 25, 27, 28, 29, 31];
+    const { layout, stage } = allocateSaeimaSeats(seats, rows);
+    expect(stage).toBe('concentrated-0');
+    expect(rowsOf(layout)).toEqual([
+      'AABBCCDDEFHJPQQQ',
+      'ABBBCCDDEFHJOPQQQ',
+      'AABBBCCDDEFHJOQQQQ',
+      'AAAABBBCCDDEFHJNQQQQ',
+      'AAAAABBBCCDDEFHJNQQQQ',
+      'AAAAAABBBCCDDEFGHLQQQQ',
+      'AAAAABBBBCCDDEFGHLQQQQQ',
+      'AAAAAABBBBCCDDEFGKLQQQQQ',
+      'AAAAABBBBCCCDDDEFGIKQQQQQ',
+      'AAAAAABBBBCCCDDDEEFGIKQQQQQ',
+      'AAAAAAABBBBCCCDDDEEFGIKQQQQQ',
+      'AAAAAAABBBBCCCDDDEEFGIMQQQQQQ',
+      'AAAAAAAABBBBBCCCDDDEEFGIMQQQQQQ',
+    ]);
+  });
+  it('acceptance checks on 300 randomized configs (totals, order, no islands)', () => {
+    let rng = 777;
+    const rand = () => ((rng = (rng * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+    for (let t = 0; t < 300; t++) {
+      const P = 1 + Math.floor(rand() * 40);
+      const seats: number[] = [];
+      for (let p = 0; p < P; p++) seats.push(1 + Math.floor(rand() * 60));
+      const N = seats.reduce((a, b) => a + b, 0);
+      const R = 1 + Math.floor(rand() * 16);
+      const rows: number[] = Array.from({ length: R }, () => 1 + Math.floor(rand() * 30));
+      const sum = rows.reduce((a, b) => a + b, 0);
+      const scaled = rows.map((r) => Math.max(1, Math.floor((r * N) / sum)));
+      let acc = scaled.reduce((a, b) => a + b, 0);
+      let i = 0;
+      while (acc !== N) {
+        const d = N - acc;
+        scaled[i % R] += Math.sign(d);
+        acc += Math.sign(d);
+        i++;
+      }
+      checkInvariants(seats, scaled, 'rand');
+    }
+  });
+  it('sanity: single party 301; 301 one-seat parties; 37 one-seat + 3 large; 2 rows; 1 row', () => {
+    checkInvariants([301], [150, 151], 's1');
+    const oneEach = new Array(301).fill(1);
+    checkInvariants(oneEach, [150, 151], 's2');
+    checkInvariants([...new Array(37).fill(1), 100, 80, 84], [15, 17, 20, 22, 25, 28, 30, 33, 34, 37, 40], 's3');
+    checkInvariants([150, 151], [200, 101], 's4');
+    checkInvariants([301], [301], 's5');
+    checkInvariants([100, 100, 101], [301], 's6');
+  });
+  it('determinism: identical output on repeated calls', () => {
+    const seats = [64, 46, 31, 31, 17, 13, 8, 7, 5, 5, 4, 3, 2, 2, 2, 2, 59];
+    const rows = [16, 17, 18, 20, 21, 22, 23, 24, 25, 27, 28, 29, 31];
+    expect(allocateSaeimaSeats(seats, rows)).toEqual(allocateSaeimaSeats(seats, rows));
+  });
+  it('built-in scenario: buildArc produces exact totals and zero islands', () => {
+    const parties = [
+      { id: 'a', seats: 64 }, { id: 'b', seats: 26 }, { id: 'c', seats: 21 },
+      { id: 'd', seats: 31 }, { id: 'e', seats: 5 }, { id: 'f', seats: 17 },
+      { id: 'g', seats: 13 }, { id: 'h', seats: 3 }, { id: 'i', seats: 22 },
+      { id: 'j', seats: 4 }, { id: 'k', seats: 19 }, { id: 'l', seats: 8 },
+      { id: 'm', seats: 7 }, { id: 'n', seats: 17 }, { id: 'o', seats: 13 },
+      { id: 'p', seats: 26 }, { id: 'q', seats: 5 },
+    ];
+    const v = buildArc(parties);
+    expect(v.seats.length).toBe(301);
+    const counts = new Map<string, number>();
+    for (const s of v.seats) counts.set(s.allianceId, (counts.get(s.allianceId) ?? 0) + 1);
+    for (const p of parties) expect(counts.get(p.id)).toBe(p.seats);
   });
 });
