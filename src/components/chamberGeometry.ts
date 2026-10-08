@@ -144,26 +144,18 @@ export function buildArc(
     }
   }
 
-  // ---- Step 3: ordered slot list (row-major boustrophedon) + run assignment ----
-  // Rows are walked inner->outer; each row's direction alternates so the last
-  // seat of one row is adjacent to the first seat of the next (the professional
-  // parliament-chart walk). Consecutive slots are always within 1.6 seat
-  // diameters, so every alliance handed a consecutive run forms ONE connected
-  // wedge. All rows span the same 164-degree range (spec Step 4), giving the
-  // band straight, even radial ends.
-  const orderedSlots: { row: number; j: number }[] = [];
-  for (let i = 0; i < K; i++) {
-    const js = i % 2 === 0
-      ? [...Array(rowCounts[i]).keys()]
-      : [...Array(rowCounts[i]).keys()].reverse();
-    for (const j of js) orderedSlots.push({ row: i, j });
-  }
+    // ---- Step 3: wedge allocation ----
+  // Each alliance occupies the SAME FRACTION of EVERY row (its national seat
+  // share), so its per-row slices stack into one vertical wedge. Boundary
+  // indices per row are rounded to the ideal share, then a correction pass
+  // shifts single boundaries by one slot to make every alliance's rendered
+  // total EXACT while keeping every slice contiguous and the order identical
+  // in every row.
+  const ownership = allocateWedges(orderedParties, rowCounts);
   const rowSeats: Seat[][] = radii.map((_, i) => Array.from({ length: rowCounts[i] }, () => ({ x: 0, y: 0, allianceId: '' })));
-  let slotIdx = 0;
-  for (const p of orderedParties) {
-    for (let k = 0; k < p.seats && slotIdx < orderedSlots.length; k++, slotIdx++) {
-      const { row, j } = orderedSlots[slotIdx];
-      rowSeats[row][j].allianceId = p.id;
+  for (let i = 0; i < K; i++) {
+    for (let k = 0; k < rowCounts[i]; k++) {
+      rowSeats[i][k].allianceId = orderedParties[ownership[i][k]].id;
     }
   }
 
@@ -187,10 +179,158 @@ export function buildArc(
   const W = Math.max(canvasWidth, 2 * bandHalfWidth + 2 * (seatR + pad));
   const H = Math.round(cy + rOuter + seatR + pad + 26);
 
+  assertArcOrientation(rowSeats, { x: cx, y: cy });
+  assertArcWedges(orderedParties, rowCounts, ownership);
+
   return { seats, seatR, cell, K, radii, rowCounts, cx, cy, W, H, pad };
 }
 
-// Repair: ensure every alliance's occupied rows are consecutive.
+// ============================================================
+// Wedge allocator: alliance p owns the same fraction of every row.
+// rows[i] counts may be in any order; they must sum to N.
+// Returns rows[i] = alliance index per slot, left to right.
+// ============================================================
+
+export function allocateWedges(alliances: { id: string; seats: number }[], rows: number[]): number[][] {
+  const P = alliances.length;
+  const N = alliances.reduce((s, a) => s + a.seats, 0);
+  if (N !== rows.reduce((s, n) => s + n, 0))
+    throw new Error('rows must sum to N');
+
+  const cum = [0];
+  for (let p = 0; p < P; p++) cum.push(cum[p] + alliances[p].seats);
+
+  const R = rows.length;
+  // bounds[p][i] = first slot AFTER alliance p's slice in row i
+  const bounds: number[][] = [];
+  for (let p = 0; p <= P; p++) bounds.push([]);
+  for (let i = 0; i < R; i++) {
+    bounds[0][i] = 0;
+    for (let p = 1; p <= P; p++)
+      bounds[p][i] = Math.round((rows[i] * cum[p]) / N);
+  }
+
+  const rendered = (): number[] => {
+    const r = new Array(P).fill(0);
+    for (let i = 0; i < R; i++)
+      for (let p = 0; p < P; p++)
+        r[p] += bounds[p + 1][i] - bounds[p][i];
+    return r;
+  };
+  let d = rendered().map((v, p) => v - alliances[p].seats);
+
+  // One boundary between fromP and toP shifts by one slot in ONE row,
+  // re-assigning ownership at the wedge edges; each shift picks the row
+  // where the boundary moves closest to its ideal position.
+  const shiftBoundary = (j: number, delta: -1 | 1): void => {
+    let bestRow = -1, bestCost = Infinity;
+    for (let i = 0; i < R; i++) {
+      const valid = delta === -1
+        ? bounds[j][i] - 1 >= bounds[j - 1][i]
+        : bounds[j][i] + 1 <= bounds[j + 1][i];
+      if (!valid) continue;
+      const ideal = (rows[i] * cum[j]) / N;
+      const cost = Math.abs(ideal - (bounds[j][i] + delta));
+      if (cost < bestCost) { bestCost = cost; bestRow = i; }
+    }
+    if (bestRow < 0) throw new Error(`no valid row for boundary ${j}`);
+    bounds[j][bestRow] += delta;
+  };
+
+  const transfer = (fromP: number, toP: number) => {
+    if (toP > fromP)
+      for (let j = fromP + 1; j <= toP; j++) shiftBoundary(j, -1);
+    else
+      for (let j = fromP; j > toP; j--) shiftBoundary(j, +1);
+    d = rendered().map((v, p) => v - alliances[p].seats);
+  };
+
+  // Fix rounding drift: nearest surplus/deficit pair, repeat.
+  let guard = 0;
+  while (d.some((x) => x !== 0)) {
+    if (guard++ > 10000) throw new Error('correction did not converge');
+    const surplus = d.map((x, p) => [x, p] as [number, number]).filter(([x]) => x > 0);
+    const deficit = d.map((x, p) => [x, p] as [number, number]).filter(([x]) => x < 0);
+    if (surplus.length === 0 || deficit.length === 0)
+      throw new Error('unbalanced deviations');
+    let best: [number, number] = [surplus[0][1], deficit[0][1]];
+    let bestDist = Infinity;
+    for (const [, sp] of surplus)
+      for (const [, dp] of deficit)
+        if (Math.abs(sp - dp) < bestDist) {
+          bestDist = Math.abs(sp - dp); best = [sp, dp];
+        }
+    transfer(best[0], best[1]);
+  }
+
+  const out: number[][] = [];
+  for (let i = 0; i < R; i++) {
+    const arr: number[] = [];
+    for (let p = 0; p < P; p++)
+      for (let k = bounds[p][i]; k < bounds[p + 1][i]; k++) arr[k] = p;
+    if (arr.length !== rows[i] || arr.some((v) => v === undefined))
+      throw new Error('row build failed');
+    out.push(arr);
+  }
+  return out;
+}
+
+// --- Mandatory orientation self-test (SECTION 2) ---
+export function assertArcOrientation(
+  rows: { x: number; y: number }[][],
+  center: { x: number; y: number },
+): void {
+  for (const row of rows) for (const s of row)
+    if (!(s.y > center.y)) throw new Error('Arc flipped: seat at/above center');
+  for (const row of rows) {
+    const mid = row[Math.floor(row.length / 2)];
+    for (const s of row)
+      if (s.y > mid.y + 0.001) throw new Error('Arc flipped: row ends below row middle');
+  }
+  const all = rows.flat();
+  const lowest = all.reduce((a, b) => (b.y > a.y ? b : a));
+  const minX = Math.min(...all.map((s) => s.x));
+  const maxX = Math.max(...all.map((s) => s.x));
+  if (Math.abs(lowest.x - (minX + maxX) / 2) > (maxX - minX) * 0.1)
+    throw new Error('Arc sideways or flipped: lowest seat not centered');
+}
+
+// --- Dev-time wedge assertions (SECTION 3) ---
+export function assertArcWedges(
+  alliances: { id: string; seats: number }[],
+  rowCounts: number[],
+  ownership: number[][],
+): void {
+  const P = alliances.length;
+  const N = alliances.reduce((s, a) => s + a.seats, 0);
+  const cum = [0];
+  for (let p = 0; p < P; p++) cum.push(cum[p] + alliances[p].seats);
+  const fails: string[] = [];
+  const counts = new Array(P).fill(0);
+  for (let i = 0; i < rowCounts.length; i++) {
+    const arr = ownership[i];
+    if (arr.length !== rowCounts[i]) fails.push(`row ${i}: length ${arr.length} != ${rowCounts[i]}`);
+    const seen: number[] = []
+    for (const p of arr) if (seen[seen.length - 1] !== p) seen.push(p);
+    for (let p = 1; p < seen.length; p++)
+      if (seen[p] <= seen[p - 1]) { fails.push(`row ${i}: order ${seen} not ascending`); break; }
+    for (const p of seen) counts[p] += arr.filter((x) => x === p).length;
+    for (let k = 0; k < arr.length; k++) {
+      const p = arr[k];
+      const u = (k + 0.5) / arr.length;
+      if (u < cum[p] / N - 4 / arr.length || u > (cum[p] + alliances[p].seats) / N + 4 / arr.length)
+        fails.push(`row ${i} slot ${k}: u=${u.toFixed(3)} outside share of alliance ${alliances[p].id}`);
+    }
+  }
+  for (let p = 0; p < P; p++)
+    if (counts[p] !== alliances[p].seats)
+      fails.push(`alliance ${alliances[p].id}: rendered ${counts[p]} != entered ${alliances[p].seats}`);
+  if (counts.reduce((a, b) => a + b, 0) !== N)
+    fails.push(`grand total ${counts.reduce((a, b) => a + b, 0)} != ${N}`);
+  if (fails.length)
+    console.warn('[arc] wedge assertion failures:\n' + fails.join('\n'));
+}
+
 
 
 // ============================================================

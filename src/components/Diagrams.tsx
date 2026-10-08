@@ -209,11 +209,21 @@ export function SaeimaArc({ scenario }: { scenario: Scenario }) {
   const layout = buildArc(parties);
   const seats = layout.seats.map((s) => ({ ...s, label: `${visuals.nameOf(s.allianceId)} — ${seatsOf(s.allianceId)} seats` }));
   const progress = useEnterProgress(seats.length);
-  const ok = assertContiguity('Saeima', layout.seats, layout.seatR * 2);
-  void ok;
   const similar = similarColorPairs(parties, scenario);
   const majority = Math.floor(301 / 2) + 1;
   const rOuter = layout.radii[layout.K - 1];
+
+  // Center label sits in the open space ABOVE the band (SECTION 4.3):
+  // between the center point C and the innermost row. Reserve a bounding
+  // box and verify no seat circle intersects it.
+  const labelY = layout.cy + (layout.radii[0] - layout.cy) / 2;
+  const labelBox = { x0: layout.cx - 110, x1: layout.cx + 110, y0: labelY - 34, y1: labelY + 22 };
+  for (const s of layout.seats) {
+    const nx = Math.max(labelBox.x0, Math.min(s.x, labelBox.x1));
+    const ny = Math.max(labelBox.y0, Math.min(s.y, labelBox.y1));
+    if ((nx - s.x) ** 2 + (ny - s.y) ** 2 < (layout.seatR + 2) ** 2)
+      throw new Error('center label collides with a seat circle');
+  }
 
   return (
     <ChamberCard
@@ -230,10 +240,10 @@ export function SaeimaArc({ scenario }: { scenario: Scenario }) {
         <line x1={layout.cx - 7} y1={layout.cy + rOuter + layout.seatR + 6}
           x2={layout.cx + 7} y2={layout.cy + rOuter + layout.seatR + 6}
           stroke="#c3c9d8" strokeWidth={2} />
-        {/* center label in the open valley (LAW 5: reserved empty space) */}
-        <text x={layout.cx} y={layout.cy - layout.radii[0] - layout.cell - 26} textAnchor="middle" fontSize={18} fontWeight={600} fill="#16192b">Saeima, Republic of Latvia</text>
-        <text x={layout.cx} y={layout.cy - layout.radii[0] - layout.cell - 4} textAnchor="middle" fontSize={15} fontWeight={700} fill="#5a6172">{total} / 301 seats</text>
-        <text x={layout.cx} y={layout.cy - layout.radii[0] - layout.cell + 16} textAnchor="middle" fontSize={13} fill="#8b93a7">majority: {majority}</text>
+        {/* center label in the open valley above the band (LAW 5: reserved empty space) */}
+        <text x={layout.cx} y={labelY - 16} textAnchor="middle" fontSize={18} fontWeight={600} fill="#16192b">Saeima, Republic of Latvia</text>
+        <text x={layout.cx} y={labelY + 4} textAnchor="middle" fontSize={15} fontWeight={700} fill="#5a6172">{total} / 301 seats</text>
+        <text x={layout.cx} y={labelY + 20} textAnchor="middle" fontSize={13} fill="#8b93a7">majority: {majority}</text>
         {/* axis labels in the outer padding */}
         <text x={layout.cx - rOuter - 40} y={layout.cy - 6} textAnchor="middle" className="axis-label">← Far Left</text>
         <text x={layout.cx + rOuter + 40} y={layout.cy - 6} textAnchor="middle" className="axis-label">Far Right →</text>

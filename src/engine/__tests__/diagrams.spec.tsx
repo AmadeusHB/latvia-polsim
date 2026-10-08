@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { renderToString } from 'react-dom/server';
 import { SaeimaArc, WestminsterDiagram } from '../../components/Diagrams';
-import { buildArc, buildChamber, assertContiguity, rgbDistance } from '../../components/chamberGeometry';
+import { buildArc, buildChamber, assertContiguity, rgbDistance, allocateWedges } from '../../components/chamberGeometry';
 import { runSimulation } from '../simulate';
 import { defaultDistricts } from '../../data/presets';
 import { buildScenario, RIGHT, RIGHT_BLOCS, CENTER, CENTER_BLOCS, LEFT, LEFT_BLOCS } from './referenceData';
@@ -245,5 +245,95 @@ describe('Engine units', () => {
     const xs = layout.opposition.map((s) => +s.x.toFixed(4));
     // columns on the shared grid
     expect(new Set(xs).size).toBeLessThanOrEqual(layout.SPR);
+  });
+});
+
+describe('Wedge allocator (arc party wedges)', () => {
+  const letters = 'ABCDEFGH';
+  const rowsOf = (own: number[][]) => own.map((r) => r.map((p) => letters[p]).join(''));
+  it('verified sample: 8 alliances, 13 rows — exact wedges matching the reference layout', () => {
+    const seats = [24, 38, 52, 63, 14, 45, 41, 24];
+    const rows = [16, 17, 18, 20, 21, 22, 23, 24, 25, 27, 28, 29, 31];
+    expect(seats.reduce((a, b) => a + b, 0)).toBe(301);
+    const own = allocateWedges(seats.map((s, i) => ({ id: letters[i], seats: s })), rows);
+    expect(rowsOf(own)).toEqual([
+      'ABBCCCDDDEFFFGGH',
+      'ABBCCCDDDDEFFGGGH',
+      'ABBBCCCDDDDFFFGGGH',
+      'AABBCCCCDDDDEFFFGGHH',
+      'AABBCCCCDDDDEFFFGGGHH',
+      'AABBBCCCDDDDDEFFFGGGHH',
+      'AABBBCCCCDDDDDEFFFGGGHH',
+      'AABBBCCCCDDDDDEFFFFGGGHH',
+      'AABBBCCCCDDDDDDEFFFFGGGHH',
+      'AABBBBCCCCDDDDDDEFFFFGGGGHH',
+      'AABBBBCCCCCDDDDDEEFFFFGGGGHH',
+      'AABBBBCCCCCDDDDDDEFFFFFGGGGHH',
+      'AAABBBCCCCCCDDDDDDEEFFFFGGGGHHH',
+    ]);
+  });
+  it('exact totals, contiguous slices, identical per-row order on randomized configs', () => {
+    let rng = 12345;
+    const rand = () => ((rng = (rng * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+    for (let t = 0; t < 300; t++) {
+      const P = 1 + Math.floor(rand() * 40);
+      const seats: number[] = [];
+      for (let p = 0; p < P; p++) seats.push(1 + Math.floor(rand() * 12));
+      const N = seats.reduce((a, b) => a + b, 0);
+      const R = 1 + Math.floor(rand() * 16);
+      const rows: number[] = Array.from({ length: R }, () => 1 + Math.floor(rand() * 30));
+      const sum = rows.reduce((a, b) => a + b, 0);
+      let rem = N;
+      const scaled = rows.map((r) => Math.max(1, Math.floor((r * N) / sum)));
+      let acc = scaled.reduce((a, b) => a + b, 0);
+      let i = 0;
+      while (acc !== N) {
+        const d = N - acc;
+        scaled[i % R] += Math.sign(d);
+        acc += Math.sign(d);
+        i++;
+      }
+      const own = allocateWedges(seats.map((s, p) => ({ id: letters[p % 10] + p, seats: s })), scaled);
+      const counts = new Array(P).fill(0);
+      for (const r of own) {
+        const seen: number[] = [];
+        for (const p of r) { counts[p]++; if (seen[seen.length - 1] !== p) seen.push(p); }
+        for (let q = 1; q < seen.length; q++) expect(seen[q]).toBeGreaterThan(seen[q - 1]);
+      }
+      for (let p = 0; p < P; p++) expect(counts[p]).toBe(seats[p]);
+    }
+  });
+  it('single alliance holding all 301 seats fills every slot', () => {
+    const own = allocateWedges([{ id: 'X', seats: 301 }], [150, 151]);
+    expect(own[0].every((p) => p === 0)).toBe(true);
+    expect(own[1].every((p) => p === 0)).toBe(true);
+  });
+  it('deterministic: same input yields identical allocation', () => {
+    const seats = [24, 38, 52, 63, 14, 45, 41, 24].map((s, i) => ({ id: letters[i], seats: s }));
+    const rows = [16, 17, 18, 20, 21, 22, 23, 24, 25, 27, 28, 29, 31];
+    expect(allocateWedges(seats, rows)).toEqual(allocateWedges(seats, rows));
+  });
+  it('SECTION 4.1: arc seats never overlap (center distance >= diameter + 1)', () => {
+    for (const parties of [
+      [{ id: 'a', seats: 120 }, { id: 'b', seats: 80 }, { id: 'c', seats: 60 }, { id: 'd', seats: 41 }],
+      [{ id: 'a', seats: 24 }, { id: 'b', seats: 38 }, { id: 'c', seats: 52 }, { id: 'd', seats: 63 },
+       { id: 'e', seats: 14 }, { id: 'f', seats: 45 }, { id: 'g', seats: 41 }, { id: 'h', seats: 24 }],
+    ]) {
+      const v = buildArc(parties as any);
+      const d = 2 * v.seatR;
+      for (let i = 0; i < v.seats.length; i++)
+        for (let j = i + 1; j < v.seats.length; j++) {
+          const dist = Math.hypot(v.seats[i].x - v.seats[j].x, v.seats[i].y - v.seats[j].y);
+          if (dist < d + 1) expect.fail(`arc seats ${i},${j} overlap: ${dist} < ${d + 1}`);
+        }
+    }
+  });
+  it('SECTION 4.4: seats bounding box symmetric about the vertical centerline', () => {
+    const v = buildArc([{ id: 'a', seats: 150 }, { id: 'b', seats: 151 }]);
+    const minX = Math.min(...v.seats.map((s) => s.x));
+    const maxX = Math.max(...v.seats.map((s) => s.x));
+    const seatD = 2 * v.seatR;
+    const center = (minX + maxX) / 2;
+    expect(Math.abs(center - v.cx)).toBeLessThan(seatD);
   });
 });
