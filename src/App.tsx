@@ -7,6 +7,7 @@ import {
 import { SaeimaArc, WestminsterDiagram } from './components/Diagrams';
 import { euAffiliationWeights, computeAlliances } from './engine/simulate';
 import { BUILTIN_TEMPLATES } from './data/builtinTemplates';
+import { runCalibration } from './engine/calibration';
 
 type Tab = 'scenarios' | 'parties' | 'alliances' | 'blocs' | 'districts' | 'overrides' | 'weights' | 'results';
 
@@ -722,6 +723,38 @@ function ResultsTab() {
       </table>
 
       {bts && <BehindTheScenes res={res} allianceById={allianceById} colorById={colorById} />}
+      {bts && <CalibrationPanel />}
+    </div>
+  );
+}
+
+function CalibrationPanel() {
+  const [report, setReport] = useState<any>(null);
+  return (
+    <div className="bts">
+      <h3>Calibration Report (six historical elections)</h3>
+      <button className="primary" onClick={() => setReport(runCalibration())}>Run calibration</button>
+      {report && (
+        <div>
+          <p>Mean governor accuracy: <strong>{report.meanGovernorAccuracy.toFixed(2)}/18</strong> ·
+             Mean share correlation: <strong>{report.meanShareCorrelation.toFixed(3)}</strong> (target ≥ 0.85)</p>
+          {report.elections.map((e: any) => (
+            <div key={e.label} className="cal-election">
+              <h4>{e.label}</h4>
+              <p>Governing: {e.governing.join(', ')}</p>
+              <p>Governor accuracy: <strong>{e.governorAccuracy}/{e.governorTotal}</strong> ·
+                 Share correlation: {e.shareCorrelation.toFixed(3)} ·
+                 Strongholds held/flipped: {e.strongholdsHeld}/{e.strongholdsFlipped}</p>
+              <p>Most concentrated: {e.concentration.map((c: any) => `${c.alliance} (${c.peakDistrict}, ×${c.ratio.toFixed(1)})`).join(' · ')}</p>
+              {e.flags.map((f: string) => <p key={f} className="meta">⚠ {f}</p>)}
+            </div>
+          ))}
+          <h4>Anti-homogenization check</h4>
+          {report.antiHomogenization.map((a: any) => (
+            <p key={a.district} className="meta">{a.district}: correlation {a.correlation.toFixed(3)}{a.tooUniform ? ' — TOO UNIFORM (identity too weak)' : ''}</p>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
