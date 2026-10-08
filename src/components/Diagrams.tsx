@@ -71,13 +71,14 @@ interface BlocVisuals {
 
 function useBlocVisuals(scenario: Scenario): BlocVisuals {
   const byId = new Map(scenario.alliances.map((a) => [a.id, a]));
+  const fillOfHelper = (id: string) => byId.get(id)?.color ?? '#bbb';
   const blocOf = new Map<string, { color: string; name: string }>();
   for (const b of scenario.regionalAlliances) {
     for (const a of b.memberAllianceIds) blocOf.set(a, { color: b.color, name: b.name });
   }
   return {
-    fillOf: (id) => byId.get(id)?.color ?? '#bbb',          // LAW 3: exact hex
-    strokeOf: (id) => blocOf.get(id)?.color ?? '#999',       // LAW 4
+    fillOf: fillOfHelper,                                   // LAW 3: exact hex
+    strokeOf: (id) => blocOf.get(id)?.color ?? byId.get(id)?.color ?? '#999',  // LAW 4: bloc color; bloc-less alliances use their own alliance color
     nameOf: (id) => byId.get(id)?.name ?? '',
   };
 }
@@ -98,7 +99,7 @@ function similarColorPairs(parties: { id: string }[], scenario: Scenario): Set<s
 
 // LAW 3/4 seat field: exact fill, one stroke style, hover dimming only.
 function SeatField({
-  seats, seatR, strokeW, visuals, similar, cogBadge, hovered, progress,
+  seats, seatR, strokeW, visuals, similar, cogBadge, hovered, progress, outline = 'bloc',
 }: {
   seats: (Seat & { label: string })[];
   seatR: number;
@@ -108,6 +109,7 @@ function SeatField({
   cogBadge?: boolean;
   hovered: string | null;
   progress: number;
+  outline?: 'bloc' | 'none';
 }) {
   const dim = hovered != null;
   void similar; // LAW 7 pairs computed upstream; boundary rendering handled via distinct strokes
@@ -119,7 +121,8 @@ function SeatField({
         return (
           <circle key={i} cx={s.x} cy={s.y} r={seatR}
             fill={visuals.fillOf(s.allianceId)}
-            stroke={visuals.strokeOf(s.allianceId)} strokeWidth={strokeW}
+            stroke={outline === 'none' ? 'none' : visuals.strokeOf(s.allianceId)}
+            strokeWidth={outline === 'none' ? 0 : strokeW}
             opacity={visible ? (isDim ? 0.25 : 1) : 0}
             style={{ transition: 'opacity 90ms linear' }}>
             <title>{s.label}</title>
@@ -235,7 +238,7 @@ export function SaeimaArc({ scenario }: { scenario: Scenario }) {
     >
       <svg viewBox={`0 0 ${layout.W} ${layout.H}`} className="diagram" role="img" aria-label="Saeima seat diagram">
         <SeatField seats={seats} seatR={layout.seatR} strokeW={2} visuals={visuals} similar={similar}
-          hovered={hovered} progress={progress} />
+          hovered={hovered} progress={progress} outline="none" />
         {/* majority tick under the band bottom */}
         <line x1={layout.cx - 7} y1={layout.cy + rOuter + layout.seatR + 6}
           x2={layout.cx + 7} y2={layout.cy + rOuter + layout.seatR + 6}

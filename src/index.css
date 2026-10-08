@@ -154,6 +154,7 @@ label input[type="number"], label input:not([type]), label select { font-weight:
 .legend-item strong { color: var(--text); }
 .legend-dot { width: 11px; height: 11px; border-radius: 3px; display: inline-block; border: 1px solid rgb(0 0 0 / 14%); flex-shrink: 0; }
 .legend-cols { display: flex; gap: 26px; flex-wrap: wrap; padding: 12px 2px 4px; border-top: 1px solid var(--border); margin-top: 10px; }
+.legend-cols .legend-col { display: flex; flex-direction: column; align-items: flex-start; }
 .legend-col { min-width: 190px; flex: 1; }
 .legend-title { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-3); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
 .legend-title .sec-dot { width: 8px; height: 8px; border-radius: 50%; }
@@ -180,9 +181,8 @@ label input[type="number"], label input:not([type]), label select { font-weight:
 }
 
 /* LAW 8 legend spec: two columns, aligned counts, 14px chips */
-.legend-two-col { display: flex; gap: 16px; padding-top: 6px; }
-.legend-two-col .legend-col { flex: 1; min-width: 0; }
-.legend-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; min-height: 18px; }
+.legend-two-col { display: flex; flex-wrap: wrap; column-gap: 28px; row-gap: 10px; padding-top: 6px; }
+.legend-row { display: inline-flex; align-items: center; gap: 8px; padding: 2px 0; min-height: 18px; }
 .legend-chip { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
-.legend-name { font-size: 13px; color: #16192b; white-space: nowrap; overflow: visible; }
-.legend-count { font-size: 12px; color: #64748b; margin-left: auto; min-width: 3em; text-align: right; }
+.legend-name { font-size: 13px; color: #16192b; white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.legend-count { font-size: 12px; color: #64748b; min-width: 1.5em; text-align: right; }
